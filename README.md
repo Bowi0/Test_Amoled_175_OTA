@@ -64,12 +64,12 @@ the ESP32 and are not part of the repository. The device starts on Screen1.
 Wi-Fi scanning and connection are only started after Screen4 is opened (swipe
 left from Screen3); saved credentials are then used automatically.
 
-While awake and connected, the firmware checks the repository's OTA manifest
-every 10 seconds. When a newer release is found, the device downloads it
+The firmware stays awake and checks the repository's OTA manifest every
+10 seconds while connected. When a newer release is found, the device downloads it
 automatically and shows the download percentage on Screen4. It verifies HTTPS
 certificates using the ESP-IDF certificate bundle (after synchronizing the
 system clock with NTP) and checks the firmware SHA-256 before switching to the
-new app slot and rebooting. It does not poll while in deep sleep.
+new app slot and rebooting. The BOOT button no longer enters deep sleep.
 
 The partition table reserves two 6 MiB OTA app slots while keeping the existing
 SPIFFS region unchanged. The first installation of this OTA-capable layout
