@@ -2,6 +2,10 @@
 #include "wifi_ota.h"
 #include <stdio.h>
 
+#ifndef APP_VERSION
+#define APP_VERSION "0.1.0"
+#endif
+
 lv_obj_t *ui_Screen4 = NULL;
 
 static lv_obj_t *wifi_list;
@@ -13,6 +17,7 @@ static lv_obj_t *scan_button;
 static lv_obj_t *connect_button;
 static lv_obj_t *update_status_label;
 static lv_obj_t *download_bar;
+static lv_obj_t *firmware_version_label;
 static uint32_t last_scan_generation = UINT32_MAX;
 static uint32_t last_ui_update_ms;
 static bool keyboard_visible;
@@ -202,6 +207,14 @@ void ui_Screen4_screen_init(void)
     lv_bar_set_value(download_bar, 0, LV_ANIM_OFF);
     lv_obj_align(download_bar, LV_ALIGN_TOP_MID, 0, 364);
 
+    firmware_version_label = lv_label_create(ui_Screen4);
+    char version_text[48];
+    snprintf(version_text, sizeof(version_text), "Installiert: %s", APP_VERSION);
+    lv_label_set_text(firmware_version_label, version_text);
+    lv_obj_set_style_text_font(firmware_version_label, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(firmware_version_label, lv_color_hex(0xA0A0A0), LV_PART_MAIN);
+    lv_obj_align(firmware_version_label, LV_ALIGN_BOTTOM_MID, 0, -18);
+
     keyboard = lv_keyboard_create(ui_Screen4);
     lv_obj_set_size(keyboard, 300, 180);
     lv_obj_align(keyboard, LV_ALIGN_TOP_MID, 0, 164);
@@ -229,6 +242,7 @@ void ui_Screen4_screen_destroy(void)
     connect_button = NULL;
     update_status_label = NULL;
     download_bar = NULL;
+    firmware_version_label = NULL;
     keyboard_visible = false;
 }
 
