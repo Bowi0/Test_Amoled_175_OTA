@@ -1,0 +1,75 @@
+name: Firmware release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+
+      - name: Build firmware
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+        run: pio run -e waveshare_amoled_175
+
+      - name: Create update manifest
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p release
+          cp .pio/build/waveshare_amoled_175/firmware.bin release/firmware.bin
+          sha256sum release/firmware.bin | awk '{print $1}' > release/sha256.txt
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = {
+              "version": os.environ["APP_VERSION"],
+              "url": "https://github.com/Bowi0/Test_Amoled_175_OTA/releases/latest/download/firmware.bin",
+              "sha256": Path("release/sha256.txt").read_text().strip(),
+          }
+          Path("release/manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/firmware.bin
+            release/manifest.json
+          generate_release_notes: true
+
+      - name: Publish latest manifest to main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: manifest-repo
+
+      - name: Update manifest
+        run: |
+          cp release/manifest.json manifest-repo/ota/manifest.json
+          cd manifest-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ota/manifest.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update OTA manifest for ${{ github.ref_name }}"
+            git push origin main
+          fi

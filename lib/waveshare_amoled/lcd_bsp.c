@@ -20,6 +20,7 @@ static esp_lcd_panel_handle_t lcd_panel_handle = NULL;
 static SemaphoreHandle_t lcd_intro_transfer_done = NULL;
 static volatile bool lcd_intro_transfer_pending = false;
 static uint16_t *lcd_intro_scaled_buffer = NULL;
+static uint16_t lcd_intro_scaled_buffer_rows = 0;
 
 // --- Forward Declarations ---
 static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io,
@@ -218,20 +219,31 @@ esp_err_t lcd_draw_intro_frame_2x(uint16_t *pixels, uint64_t *scale_time_us,
   *transfer_time_us = 0;
 
   if (lcd_intro_scaled_buffer == NULL) {
-    lcd_intro_scaled_buffer = (uint16_t *)heap_caps_malloc(
-        INTRO_OUTPUT_SIZE * INTRO_CHUNK_SOURCE_ROWS * 4,
-        MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    uint16_t rows = INTRO_CHUNK_SOURCE_ROWS;
+    while (rows > 0) {
+      lcd_intro_scaled_buffer = (uint16_t *)heap_caps_malloc(
+          INTRO_OUTPUT_SIZE * rows * 4, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+      if (lcd_intro_scaled_buffer != NULL) {
+        lcd_intro_scaled_buffer_rows = rows;
+        break;
+      }
+      rows /= 2;
+    }
     if (lcd_intro_scaled_buffer == NULL) return ESP_ERR_NO_MEM;
+    if (lcd_intro_scaled_buffer_rows < INTRO_CHUNK_SOURCE_ROWS) {
+      ESP_LOGI("lcd_bsp", "Intro display: using %u-row DMA chunks",
+               lcd_intro_scaled_buffer_rows);
+    }
   }
 
+  const uint16_t chunk_source_rows = lcd_intro_scaled_buffer_rows;
   const int x_offset = READ_LCD_ID == SH8601_ID ? 0 : 0x06;
   for (uint16_t source_y = 0; source_y < INTRO_SOURCE_SIZE;
-       source_y += INTRO_CHUNK_SOURCE_ROWS) {
+       source_y += chunk_source_rows) {
     const int64_t scaling_started_us = esp_timer_get_time();
-    const uint16_t rows =
-        (source_y + INTRO_CHUNK_SOURCE_ROWS <= INTRO_SOURCE_SIZE)
-            ? INTRO_CHUNK_SOURCE_ROWS
-            : INTRO_SOURCE_SIZE - source_y;
+    const uint16_t rows = (source_y + chunk_source_rows <= INTRO_SOURCE_SIZE)
+                              ? chunk_source_rows
+                              : INTRO_SOURCE_SIZE - source_y;
 
     for (uint16_t row = 0; row < rows; row++) {
       const uint16_t *source =

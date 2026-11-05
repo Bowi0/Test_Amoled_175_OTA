@@ -56,4 +56,26 @@ and GPIO 39 (reset). Touch uses I²C on GPIO 15/14, with reset on GPIO 40 and
 interrupt on GPIO 11. The pin assignments and controller selection match
 [Waveshare's 1.75" board reference](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75/blob/main/HARDWARE_REFERENCE.md).
 
+## Wi-Fi and automatic OTA updates
+
+Screen4 lets you scan for Wi-Fi networks, select an SSID, enter its password
+using the touch keyboard, and connect. Credentials are saved locally in NVS on
+the ESP32 and are not part of the repository. The device starts on Screen1.
+Wi-Fi scanning and connection are only started after Screen4 is opened (swipe
+left from Screen3); saved credentials are then used automatically.
+
+While awake and connected, the firmware checks the repository's OTA manifest
+every 10 seconds. When a newer release is found, the device downloads it
+automatically and shows the download percentage on Screen4. It verifies HTTPS
+certificates using the ESP-IDF certificate bundle (after synchronizing the
+system clock with NTP) and checks the firmware SHA-256 before switching to the
+new app slot and rebooting. It does not poll while in deep sleep.
+
+The partition table reserves two 6 MiB OTA app slots while keeping the existing
+SPIFFS region unchanged. The first installation of this OTA-capable layout
+requires a USB upload of the firmware and partition table. To publish an OTA
+release, push a version tag such as `v1.0.0`; GitHub Actions builds the firmware,
+creates the release asset, and publishes its version and SHA-256 to
+`ota/manifest.json`.
+
 ---

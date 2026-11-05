@@ -4,6 +4,7 @@
 #include "lcd_bsp.h"   // lcd_lvgl_Init()
 #include "ui/ui.h"     // ui_init()
 #include "intro.h"
+#include "wifi_ota.h"
 #include <nvs_flash.h>
 #include "driver/rtc_io.h"
 #include "esp_sleep.h"
@@ -100,7 +101,8 @@ void setup()
   // SquareLine UI creation
   ui_init();
 
-    // 3. BLE DIREKT BEIM START TESTEN
+  wifi_ota_init();
+
   ble_init();
 
 }
@@ -119,10 +121,14 @@ void loop()
     if (!boot_press_timing) {
       boot_press_timing = true;
       boot_press_started_ms = now_ms;
-    } else if (now_ms - boot_press_started_ms >= BOOT_DEBOUNCE_MS) {
+    } else if (now_ms - boot_press_started_ms >= BOOT_DEBOUNCE_MS &&
+               !wifi_ota_is_busy()) {
       enter_deep_sleep();
     }
   }
+
+  wifi_ota_loop();
+  ui_screen4_update();
 
   if(PRESSURE_DEMO_ENABLED) update_pressure_demo();
   else update_pressure_from_sensor();
