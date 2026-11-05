@@ -18,10 +18,35 @@ static lv_obj_t *connect_button;
 static lv_obj_t *update_status_label;
 static lv_obj_t *download_bar;
 static lv_obj_t *firmware_version_label;
+static lv_obj_t *wifi_arcs[4];
 static uint32_t last_scan_generation = UINT32_MAX;
 static uint32_t last_ui_update_ms;
 static bool keyboard_visible;
 static bool previous_wifi_connected;
+
+static void create_wifi_icon(void)
+{
+    static const lv_coord_t arc_sizes[] = {14, 24, 34, 44};
+    const lv_coord_t icon_center_x = 396;
+    const lv_coord_t icon_bottom_y = 100;
+
+    for(size_t index = 0; index < sizeof(arc_sizes) / sizeof(arc_sizes[0]); index++) {
+        const lv_coord_t size = arc_sizes[index];
+        lv_obj_t *arc = lv_arc_create(ui_Screen4);
+        lv_obj_set_size(arc, size, size);
+        lv_obj_set_pos(arc, icon_center_x - size / 2, icon_bottom_y - size);
+        lv_arc_set_bg_angles(arc, 210, 330);
+        lv_arc_set_angles(arc, 210, 330);
+        lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(arc, 3, LV_PART_MAIN);
+        lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
+        wifi_arcs[index] = arc;
+    }
+}
 
 static void set_keyboard_visible(bool visible)
 {
@@ -146,6 +171,7 @@ void ui_Screen4_screen_init(void)
     lv_obj_set_style_text_font(wifi_status_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(wifi_status_label, lv_color_hex(0xB8D7FF), LV_PART_MAIN);
     lv_obj_align(wifi_status_label, LV_ALIGN_TOP_MID, 0, 42);
+    create_wifi_icon();
 
     wifi_list = lv_dropdown_create(ui_Screen4);
     lv_obj_set_width(wifi_list, 290);
@@ -243,6 +269,9 @@ void ui_Screen4_screen_destroy(void)
     update_status_label = NULL;
     download_bar = NULL;
     firmware_version_label = NULL;
+    for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
+        wifi_arcs[index] = NULL;
+    }
     keyboard_visible = false;
 }
 
@@ -262,6 +291,13 @@ void ui_screen4_update(void)
 
     wifi_ota_snapshot_t snapshot = {0};
     wifi_ota_get_snapshot(&snapshot);
+    for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
+        const bool active = snapshot.connected &&
+                            snapshot.signal_percent >= (int)(index * 25);
+        lv_obj_set_style_arc_color(wifi_arcs[index],
+                                   lv_color_hex(active ? 0x55E58A : 0x505050),
+                                   LV_PART_MAIN);
+    }
     if(snapshot.connected) {
         char connected_text[96];
         snprintf(connected_text, sizeof(connected_text),
