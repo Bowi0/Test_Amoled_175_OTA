@@ -213,7 +213,7 @@ void ui_Screen4_screen_init(void)
     lv_label_set_text(firmware_version_label, version_text);
     lv_obj_set_style_text_font(firmware_version_label, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(firmware_version_label, lv_color_hex(0xA0A0A0), LV_PART_MAIN);
-    lv_obj_align(firmware_version_label, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_align(firmware_version_label, LV_ALIGN_BOTTOM_MID, 0, -36);
 
     keyboard = lv_keyboard_create(ui_Screen4);
     lv_obj_set_size(keyboard, 300, 180);
@@ -265,8 +265,8 @@ void ui_screen4_update(void)
     if(snapshot.connected) {
         char connected_text[96];
         snprintf(connected_text, sizeof(connected_text),
-                 "WLAN VERBUNDEN\n%s\n%s",
-                 snapshot.ssid, snapshot.ip);
+                 "WLAN VERBUNDEN (%d%%)\n%s\n%s",
+                 snapshot.signal_percent, snapshot.ssid, snapshot.ip);
         lv_label_set_text(wifi_status_label, connected_text);
         lv_obj_set_style_text_color(wifi_status_label,
                                     lv_color_hex(0x55E58A), LV_PART_MAIN);

@@ -62,7 +62,9 @@ Screen4 lets you scan for Wi-Fi networks, select an SSID, enter its password
 using the touch keyboard, and connect. Credentials are saved locally in NVS on
 the ESP32 and are not part of the repository. The device starts on Screen1.
 Wi-Fi scanning and connection are only started after Screen4 is opened (swipe
-left from Screen3); saved credentials are then used automatically.
+left from Screen3); saved credentials are then used automatically. Screen4
+shows the connected network's signal quality as a percentage, mapped from
+-100 dBm (0%) to -50 dBm or better (100%).
 
 The firmware stays awake and checks the repository's OTA manifest every
 10 seconds while connected. When a newer release is found, the device downloads it

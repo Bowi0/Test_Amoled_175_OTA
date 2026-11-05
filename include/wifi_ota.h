@@ -14,6 +14,7 @@ typedef struct {
     bool scanning;
     bool updating;
     int progress;
+    int signal_percent;
     uint32_t scan_generation;
     char ssid[33];
     char ip[16];

@@ -625,6 +625,10 @@ extern "C" void wifi_ota_get_snapshot(wifi_ota_snapshot_t *snapshot)
     snapshot->scanning = scan_in_progress;
     snapshot->updating = ota_busy;
     snapshot->progress = download_progress;
+    const int rssi = snapshot->connected ? WiFi.RSSI() : -100;
+    snapshot->signal_percent = (rssi + 100) * 2;
+    if(snapshot->signal_percent < 0) snapshot->signal_percent = 0;
+    if(snapshot->signal_percent > 100) snapshot->signal_percent = 100;
     snapshot->scan_generation = scan_generation;
     strlcpy(snapshot->ssid, WiFi.SSID().c_str(), sizeof(snapshot->ssid));
     strlcpy(snapshot->ip, WiFi.localIP().toString().c_str(), sizeof(snapshot->ip));
