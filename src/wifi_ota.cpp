@@ -50,8 +50,8 @@ static portMUX_TYPE status_mux = portMUX_INITIALIZER_UNLOCKED;
 static void *ota_mbedtls_calloc(size_t count, size_t size)
 {
     return heap_caps_calloc_prefer(count, size, 2,
-                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT,
-                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
 struct ManifestResponse {
@@ -440,7 +440,7 @@ extern "C" void wifi_ota_init(void)
     }
 
     const BaseType_t task_result =
-        xTaskCreatePinnedToCore(ota_worker, "ota_worker", 8192, nullptr, 1, nullptr, 0);
+        xTaskCreatePinnedToCore(ota_worker, "ota_worker", 16384, nullptr, 1, nullptr, 0);
     if(task_result != pdPASS) {
         Serial.println("OTA: failed to create update-check task");
         set_update_status("OTA-Prüfaufgabe konnte nicht gestartet werden", 0);
