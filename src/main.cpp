@@ -77,9 +77,6 @@ void setup()
   ui_init();
 
   wifi_ota_init();
-
-  ble_init();
-
 }
 
 void loop()

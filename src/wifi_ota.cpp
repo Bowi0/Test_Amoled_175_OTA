@@ -251,6 +251,15 @@ static bool download_firmware(const char *url, const char *expected_sha256)
 
     DownloadContext download = {};
     set_update_status("Neues Update gefunden — Download startet", 0);
+    Serial.printf("OTA: before firmware TLS internal=%u, DMA=%u, largest DMA=%u, PSRAM=%u bytes free\n",
+                  static_cast<unsigned>(heap_caps_get_free_size(
+                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                  static_cast<unsigned>(heap_caps_get_free_size(
+                      MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
+                  static_cast<unsigned>(heap_caps_get_largest_free_block(
+                      MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
+                  static_cast<unsigned>(heap_caps_get_free_size(
+                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
 
     esp_http_client_config_t config = {};
     config.url = url;

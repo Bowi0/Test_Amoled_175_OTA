@@ -72,6 +72,8 @@ automatically and shows the download percentage on Screen4. It verifies HTTPS
 certificates using the ESP-IDF certificate bundle (after synchronizing the
 system clock with NTP) and checks the firmware SHA-256 before switching to the
 new app slot and rebooting. The BOOT button no longer enters deep sleep.
+Bluetooth initializes only when enabled from Screen3 to preserve internal RAM
+for HTTPS updates.
 
 The partition table reserves two 6 MiB OTA app slots while keeping the existing
 SPIFFS region unchanged. The first installation of this OTA-capable layout
