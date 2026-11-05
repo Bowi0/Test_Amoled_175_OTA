@@ -5,8 +5,10 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <esp_crt_bundle.h>
+#include <esp_heap_caps.h>
 #include <esp_http_client.h>
 #include <esp_ota_ops.h>
+#include <mbedtls/platform.h>
 #include <mbedtls/sha256.h>
 #include <strings.h>
 #include <time.h>
@@ -44,6 +46,13 @@ static char update_status[96] = "OTA: wartet auf WLAN";
 static volatile int download_progress;
 static volatile bool ota_busy;
 static portMUX_TYPE status_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void *ota_mbedtls_calloc(size_t count, size_t size)
+{
+    return heap_caps_calloc_prefer(count, size, 2,
+                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT,
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+}
 
 struct ManifestResponse {
     char data[MANIFEST_MAX_SIZE + 1];
@@ -387,6 +396,21 @@ static void ota_worker(void *)
 
 extern "C" void wifi_ota_init(void)
 {
+    const int allocator_result =
+        mbedtls_platform_set_calloc_free(ota_mbedtls_calloc, heap_caps_free);
+    if(allocator_result != 0) {
+        Serial.printf("OTA: failed to configure TLS memory allocator (%d)\n",
+                      allocator_result);
+        set_update_status("TLS-Speicher konnte nicht eingerichtet werden", 0);
+        return;
+    }
+
+    Serial.printf("OTA: TLS heap internal=%u, PSRAM=%u bytes free\n",
+                  static_cast<unsigned>(heap_caps_get_free_size(
+                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                  static_cast<unsigned>(heap_caps_get_free_size(
+                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
+
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     WiFi.persistent(false);
