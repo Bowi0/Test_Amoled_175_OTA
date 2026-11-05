@@ -260,6 +260,7 @@ static bool download_firmware(const char *url, const char *expected_sha256)
     config.user_data = &download;
     config.max_redirection_count = 5;
     config.buffer_size = 4096;
+    config.buffer_size_tx = 4096;
     config.keep_alive_enable = false;
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
