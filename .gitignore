@@ -1,0 +1,25 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.cache/
+compile_commands.json
+lib/lvgl/
+
+# VS Code
+.vscode/
+
+# Build artifacts
+*.elf
+*.map
+*.bin
+*.hex
+*.o
+*.log
+
+# Source videos are not required to build or run the firmware
+movies/
+
+# OS junk
+.DS_Store
+Thumbs.db
