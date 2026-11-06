@@ -13,6 +13,7 @@
 static constexpr uint8_t PRESSURE_SENSOR_PIN = 2;
 static constexpr uint32_t PRESSURE_UPDATE_INTERVAL_MS = 16;
 static constexpr bool PRESSURE_DEMO_ENABLED = true;
+static constexpr bool INTRO_ENABLED = true;
 static constexpr uint32_t PRESSURE_DEMO_PERIOD_MS = 5000;
 static constexpr uint32_t PRESSURE_DEMO_UPDATE_INTERVAL_MS = 16;
 
@@ -71,12 +72,10 @@ void setup()
   // Panel + LVGL registration (flush cb, buffers, rotation, etc.)
   lcd_lvgl_Init();
 
-  play_intro();
+  if(INTRO_ENABLED) play_intro();
 
   // SquareLine UI creation
   ui_init();
-
-  wifi_ota_init();
 }
 
 void loop()

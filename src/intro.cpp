@@ -68,17 +68,20 @@ uint32_t read_u32(const uint8_t *bytes)
          (static_cast<uint32_t>(bytes[3]) << 24);
 }
 
-bool read_at(File &file, uint32_t offset, uint8_t *buffer, size_t size)
+bool read_at(const uint8_t *data, uint32_t data_size, uint32_t offset,
+             uint8_t *buffer, size_t size)
 {
-  if (!file.seek(offset)) return false;
-  return file.read(buffer, size) == size;
+  if (offset > data_size || size > data_size - offset) return false;
+  std::memcpy(buffer, data + offset, size);
+  return true;
 }
 
-bool read_chunk_header(File &file, uint32_t offset, uint32_t limit,
+bool read_chunk_header(const uint8_t *data, uint32_t data_size,
+                       uint32_t offset, uint32_t limit,
                        uint8_t header[8], uint32_t &data_end)
 {
   if (offset > limit || limit - offset < 8 ||
-      !read_at(file, offset, header, 8)) {
+      !read_at(data, data_size, offset, header, 8)) {
     return false;
   }
 
@@ -90,7 +93,8 @@ bool read_chunk_header(File &file, uint32_t offset, uint32_t limit,
   return true;
 }
 
-bool parse_stream_list(File &file, uint32_t start, uint32_t end,
+bool parse_stream_list(const uint8_t *data, uint32_t data_size,
+                       uint32_t start, uint32_t end,
                        AviInfo &info)
 {
   bool video_stream = false;
@@ -102,19 +106,23 @@ bool parse_stream_list(File &file, uint32_t start, uint32_t end,
   while (position < end) {
     uint8_t header[8];
     uint32_t data_end;
-    if (!read_chunk_header(file, position, end, header, data_end)) return false;
+    if (!read_chunk_header(data, data_size, position, end, header, data_end)) {
+      return false;
+    }
 
     const uint32_t data_start = position + 8;
     const uint32_t chunk_size = data_end - data_start;
     if (std::memcmp(header, "strh", 4) == 0 && chunk_size >= 4) {
       uint8_t stream_type[4];
-      if (!read_at(file, data_start, stream_type, sizeof(stream_type))) {
+      if (!read_at(data, data_size, data_start, stream_type,
+                   sizeof(stream_type))) {
         return false;
       }
       video_stream = std::memcmp(stream_type, "vids", 4) == 0;
     } else if (std::memcmp(header, "strf", 4) == 0 && chunk_size >= 20) {
       uint8_t bitmap_info[20];
-      if (!read_at(file, data_start, bitmap_info, sizeof(bitmap_info))) {
+      if (!read_at(data, data_size, data_start, bitmap_info,
+                   sizeof(bitmap_info))) {
         return false;
       }
       stream_width = static_cast<uint16_t>(read_u32(bitmap_info + 4));
@@ -134,31 +142,36 @@ bool parse_stream_list(File &file, uint32_t start, uint32_t end,
   return true;
 }
 
-bool parse_header_list(File &file, uint32_t start, uint32_t end,
+bool parse_header_list(const uint8_t *data, uint32_t data_size,
+                       uint32_t start, uint32_t end,
                        AviInfo &info)
 {
   uint32_t position = start;
   while (position < end) {
     uint8_t header[8];
     uint32_t data_end;
-    if (!read_chunk_header(file, position, end, header, data_end)) return false;
+    if (!read_chunk_header(data, data_size, position, end, header, data_end)) {
+      return false;
+    }
 
     const uint32_t data_start = position + 8;
     const uint32_t chunk_size = data_end - data_start;
     if (std::memcmp(header, "avih", 4) == 0 && chunk_size >= 20) {
       uint8_t main_header[20];
-      if (!read_at(file, data_start, main_header, sizeof(main_header))) {
+      if (!read_at(data, data_size, data_start, main_header,
+                   sizeof(main_header))) {
         return false;
       }
       info.frame_interval_us = read_u32(main_header);
       info.total_frames = read_u32(main_header + 16);
     } else if (std::memcmp(header, "LIST", 4) == 0 && chunk_size >= 4) {
       uint8_t list_type[4];
-      if (!read_at(file, data_start, list_type, sizeof(list_type))) {
+      if (!read_at(data, data_size, data_start, list_type,
+                   sizeof(list_type))) {
         return false;
       }
       if (std::memcmp(list_type, "strl", 4) == 0 &&
-          !parse_stream_list(file, data_start + 4, data_end, info)) {
+          !parse_stream_list(data, data_size, data_start + 4, data_end, info)) {
         return false;
       }
     }
@@ -169,7 +182,8 @@ bool parse_header_list(File &file, uint32_t start, uint32_t end,
   return position == end;
 }
 
-bool collect_video_frames(File &file, uint32_t start, uint32_t end,
+bool collect_video_frames(const uint8_t *data, uint32_t data_size,
+                          uint32_t start, uint32_t end,
                           uint8_t depth, AviFrame *frames,
                           uint32_t &frame_count)
 {
@@ -179,18 +193,21 @@ bool collect_video_frames(File &file, uint32_t start, uint32_t end,
   while (position < end) {
     uint8_t header[8];
     uint32_t data_end;
-    if (!read_chunk_header(file, position, end, header, data_end)) return false;
+    if (!read_chunk_header(data, data_size, position, end, header, data_end)) {
+      return false;
+    }
 
     const uint32_t data_start = position + 8;
     const uint32_t chunk_size = data_end - data_start;
     if (std::memcmp(header, "LIST", 4) == 0 && chunk_size >= 4) {
       uint8_t list_type[4];
-      if (!read_at(file, data_start, list_type, sizeof(list_type))) {
+      if (!read_at(data, data_size, data_start, list_type,
+                   sizeof(list_type))) {
         return false;
       }
       if (std::memcmp(list_type, "rec ", 4) == 0 &&
-          !collect_video_frames(file, data_start + 4, data_end, depth + 1,
-                                frames, frame_count)) {
+          !collect_video_frames(data, data_size, data_start + 4, data_end,
+                                depth + 1, frames, frame_count)) {
         return false;
       }
     } else if ((std::memcmp(header, "00dc", 4) == 0 ||
@@ -206,13 +223,12 @@ bool collect_video_frames(File &file, uint32_t start, uint32_t end,
   return position == end;
 }
 
-bool inspect_avi(File &file, AviInfo &info, AviFrame *frames,
-                 uint32_t &frame_count)
+bool inspect_avi(const uint8_t *data, uint32_t file_size, AviInfo &info,
+                 AviFrame *frames, uint32_t &frame_count)
 {
-  const uint32_t file_size = file.size();
   uint8_t riff_header[12];
   if (file_size < sizeof(riff_header) ||
-      !read_at(file, 0, riff_header, sizeof(riff_header)) ||
+      !read_at(data, file_size, 0, riff_header, sizeof(riff_header)) ||
       std::memcmp(riff_header, "RIFF", 4) != 0 ||
       std::memcmp(riff_header + 8, "AVI ", 4) != 0) {
     return false;
@@ -226,7 +242,8 @@ bool inspect_avi(File &file, AviInfo &info, AviFrame *frames,
   while (position < riff_end) {
     uint8_t header[8];
     uint32_t data_end;
-    if (!read_chunk_header(file, position, riff_end, header, data_end)) {
+    if (!read_chunk_header(data, file_size, position, riff_end, header,
+                           data_end)) {
       return false;
     }
 
@@ -234,11 +251,12 @@ bool inspect_avi(File &file, AviInfo &info, AviFrame *frames,
     const uint32_t chunk_size = data_end - data_start;
     if (std::memcmp(header, "LIST", 4) == 0 && chunk_size >= 4) {
       uint8_t list_type[4];
-      if (!read_at(file, data_start, list_type, sizeof(list_type))) {
+      if (!read_at(data, file_size, data_start, list_type,
+                   sizeof(list_type))) {
         return false;
       }
       if (std::memcmp(list_type, "hdrl", 4) == 0 &&
-          !parse_header_list(file, data_start + 4, data_end, info)) {
+          !parse_header_list(data, file_size, data_start + 4, data_end, info)) {
         return false;
       }
       if (std::memcmp(list_type, "movi", 4) == 0) {
@@ -256,8 +274,8 @@ bool inspect_avi(File &file, AviInfo &info, AviFrame *frames,
     return false;
   }
 
-  return collect_video_frames(file, info.movi_start, info.movi_end, 0,
-                              frames, frame_count) &&
+  return collect_video_frames(data, file_size, info.movi_start,
+                              info.movi_end, 0, frames, frame_count) &&
          frame_count > 0 && frame_count == info.total_frames;
 }
 
@@ -373,6 +391,7 @@ void decode_avi_task(void *argument)
 
 void play_intro()
 {
+  const int64_t preparation_start_us = esp_timer_get_time();
   if (!SPIFFS.begin(false, "/spiffs")) {
     Serial.println("Intro skipped: SPIFFS mount failed.");
     return;
@@ -387,13 +406,14 @@ void play_intro()
   static AviFrame frames[MAX_AVI_FRAMES];
   AviInfo info;
   uint32_t frame_count = 0;
-  if (!inspect_avi(file, info, frames, frame_count)) {
-    Serial.println("Intro skipped: invalid or unsupported MJPEG AVI.");
+  const size_t avi_size = file.size();
+  if (avi_size > UINT32_MAX) {
+    Serial.println("Intro skipped: AVI file is too large.");
     file.close();
     return;
   }
 
-  const size_t avi_size = file.size();
+  const int64_t load_start_us = esp_timer_get_time();
   uint8_t *avi_data = static_cast<uint8_t *>(
       heap_caps_malloc(avi_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (avi_data == nullptr || !file.seek(0) ||
@@ -403,18 +423,35 @@ void play_intro()
     file.close();
     return;
   }
+  const int64_t avi_loaded_us = esp_timer_get_time();
+
+  const int64_t inspect_start_us = avi_loaded_us;
+  if (!inspect_avi(avi_data, static_cast<uint32_t>(avi_size), info, frames,
+                   frame_count)) {
+    Serial.println("Intro skipped: invalid or unsupported MJPEG AVI.");
+    heap_caps_free(avi_data);
+    file.close();
+    return;
+  }
+  const int64_t avi_inspected_us = esp_timer_get_time();
 
   constexpr size_t frame_buffer_size =
       VIDEO_WIDTH * VIDEO_HEIGHT * sizeof(uint16_t);
   uint16_t *frame_buffer0 = static_cast<uint16_t *>(
-      heap_caps_malloc(frame_buffer_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+      heap_caps_malloc(frame_buffer_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  bool frame_buffer0_in_psram = frame_buffer0 != nullptr;
+  if (frame_buffer0 == nullptr) {
+    frame_buffer0 = static_cast<uint16_t *>(
+        heap_caps_malloc(frame_buffer_size,
+                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  }
   uint16_t *frame_buffer1 = static_cast<uint16_t *>(
-      heap_caps_malloc(frame_buffer_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-  bool frame_buffer1_in_psram = false;
+      heap_caps_malloc(frame_buffer_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  bool frame_buffer1_in_psram = frame_buffer1 != nullptr;
   if (frame_buffer1 == nullptr) {
     frame_buffer1 = static_cast<uint16_t *>(
-        heap_caps_malloc(frame_buffer_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    frame_buffer1_in_psram = frame_buffer1 != nullptr;
+        heap_caps_malloc(frame_buffer_size,
+                         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   }
   if (frame_buffer0 == nullptr || frame_buffer1 == nullptr) {
     Serial.println("Intro skipped: not enough memory for frame buffers.");
@@ -424,6 +461,12 @@ void play_intro()
     file.close();
     return;
   }
+  const int64_t buffers_ready_us = esp_timer_get_time();
+  Serial.printf("Intro preparation: load %.0f ms, AVI scan %.0f ms, frame buffers %.0f ms, total %.0f ms\n",
+                (avi_loaded_us - load_start_us) / 1000.0,
+                (avi_inspected_us - inspect_start_us) / 1000.0,
+                (buffers_ready_us - avi_inspected_us) / 1000.0,
+                (buffers_ready_us - preparation_start_us) / 1000.0);
 
   DecoderContext context = {};
   context.avi_data = avi_data;
@@ -530,7 +573,8 @@ void play_intro()
                       buffer_index,
                       decode_time_by_buffer_us[buffer_index] /
                           (decoded_frames_by_buffer[buffer_index] * 1000.0f),
-                      buffer_index == 1 && frame_buffer1_in_psram
+                      (buffer_index == 0 && frame_buffer0_in_psram) ||
+                              (buffer_index == 1 && frame_buffer1_in_psram)
                           ? "PSRAM"
                           : "internal");
       }

@@ -23,11 +23,12 @@ static uint32_t last_scan_generation = UINT32_MAX;
 static uint32_t last_ui_update_ms;
 static bool keyboard_visible;
 static bool previous_wifi_connected;
+static bool wifi_ota_initialized;
 
 static void create_wifi_icon(void)
 {
-    static const lv_coord_t arc_sizes[] = {14, 24, 34, 44};
-    const lv_coord_t icon_center_x = 396;
+    static const lv_coord_t arc_sizes[] = {10, 17, 24, 32};
+    const lv_coord_t icon_center_x = 374;
     const lv_coord_t icon_bottom_y = 100;
 
     for(size_t index = 0; index < sizeof(arc_sizes) / sizeof(arc_sizes[0]); index++) {
@@ -40,7 +41,7 @@ static void create_wifi_icon(void)
         lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
-        lv_obj_set_style_arc_width(arc, 3, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(arc, 2, LV_PART_MAIN);
         lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
         lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
         lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
@@ -128,6 +129,10 @@ static void screen_event(lv_event_t *event)
     }
 
     if(lv_event_get_code(event) == LV_EVENT_SCREEN_LOADED) {
+        if(!wifi_ota_initialized) {
+            wifi_ota_init();
+            wifi_ota_initialized = true;
+        }
         wifi_ota_screen_enter();
         return;
     }
