@@ -56,23 +56,32 @@ and GPIO 39 (reset). Touch uses I²C on GPIO 15/14, with reset on GPIO 40 and
 interrupt on GPIO 11. The pin assignments and controller selection match
 [Waveshare's 1.75" board reference](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75/blob/main/HARDWARE_REFERENCE.md).
 
-## Wi-Fi and automatic OTA updates
+## Wi-Fi and manual OTA updates
 
-Screen4 lets you scan for Wi-Fi networks, select an SSID, enter its password
-using the touch keyboard, and connect. Credentials are saved locally in NVS on
-the ESP32 and are not part of the repository. The device starts on Screen1.
+Screen4 presents available Wi-Fi networks in a scrollable list with signal
+strength indicators. The list refreshes automatically while Screen4 is open,
+and the connected network is highlighted in blue. Select a network and tap
+Connect to open the password entry view; the touch keyboard is shown only in
+that step. Credentials are saved locally in NVS on the ESP32 and are not part
+of the repository. The device starts on Screen1.
 Wi-Fi scanning and connection are only started after Screen4 is opened (swipe
-left from Screen3); the Wi-Fi and OTA subsystems are initialized at that point,
-and saved credentials are then used automatically. Screen4
-shows the connected network's signal quality as a percentage, mapped from
--100 dBm (0%) to -50 dBm or better (100%).
+left from Screen3); the Wi-Fi and OTA subsystems are initialized at that point.
+Screen4 starts a scan and displays the available networks before it attempts to
+connect with saved credentials. Swiping left from Screen4
+opens Screen5, which shows the update status and current firmware version and
+lets the user manually check for updates. The screens retain the horizontal
+cycle: Screen1 → Screen2 → Screen3 → Screen4 → Screen5 → Screen1.
+The LVGL Montserrat subset includes basic ASCII but not German umlauts, so the
+14 px UI font adds ä, ö, ü, Ä, Ö, and Ü using the matching Montserrat letters.
 
-The firmware stays awake and checks the repository's OTA manifest every
-10 seconds while connected. When a newer release is found, the device downloads it
-automatically and shows the download percentage on Screen4. It verifies HTTPS
-certificates using the ESP-IDF certificate bundle (after synchronizing the
-system clock with NTP) and checks the firmware SHA-256 before switching to the
-new app slot and rebooting. The BOOT button no longer enters deep sleep.
+The firmware checks the repository's OTA manifest only when the user presses
+“Nach Updates suchen...” on Screen5. If a newer release is found, Screen5 asks
+whether to install it; the firmware downloads it only after confirmation and
+shows the download percentage. It
+verifies HTTPS certificates using the ESP-IDF certificate bundle (after
+synchronizing the system clock with NTP) and checks the firmware SHA-256 before
+switching to the new app slot and rebooting. The BOOT button no longer enters
+deep sleep.
 Bluetooth initializes only when enabled from Screen3 to preserve internal RAM
 for HTTPS updates.
 

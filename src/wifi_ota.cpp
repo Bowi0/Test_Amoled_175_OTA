@@ -21,7 +21,6 @@ static constexpr char MANIFEST_URL[] =
     "https://raw.githubusercontent.com/Bowi0/Test_Amoled_175_OTA/main/ota/manifest.json";
 static constexpr char FIRMWARE_URL_PREFIX[] =
     "https://github.com/Bowi0/Test_Amoled_175_OTA/releases/";
-static constexpr uint32_t UPDATE_CHECK_INTERVAL_MS = 10000;
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
 static constexpr time_t MINIMUM_VALID_UNIX_TIME = 1704067200;
 static constexpr size_t MANIFEST_MAX_SIZE = 2048;
@@ -42,9 +41,17 @@ static uint32_t scan_generation;
 static char pending_ssid[33];
 static char pending_password[64];
 static char wifi_status[64] = "WLAN wird initialisiert...";
-static char update_status[96] = "OTA: wartet auf WLAN";
+static char update_status[96] = "Bereit";
 static volatile int download_progress;
 static volatile bool ota_busy;
+static bool update_check_requested;
+static bool update_available;
+static bool update_decision_pending;
+static bool update_install_requested;
+static bool saved_connection_pending;
+static bool scan_results_ready_for_display;
+static char pending_firmware_url[256];
+static char pending_firmware_sha256[65];
 static portMUX_TYPE status_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static void *ota_mbedtls_calloc(size_t count, size_t size)
@@ -250,7 +257,7 @@ static bool download_firmware(const char *url, const char *expected_sha256)
     }
 
     DownloadContext download = {};
-    set_update_status("Neues Update gefunden — Download startet", 0);
+    set_update_status("Neues Update gefunden - Download startet", 0);
     Serial.printf("OTA: before firmware TLS internal=%u, DMA=%u, largest DMA=%u, PSRAM=%u bytes free\n",
                   static_cast<unsigned>(heap_caps_get_free_size(
                       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
@@ -324,7 +331,7 @@ static bool download_firmware(const char *url, const char *expected_sha256)
         return false;
     }
 
-    set_update_status("Update installiert — Neustart...", 100);
+    set_update_status("Update installiert - Neustart...", 100);
     Serial.println("OTA: update verified; restarting into the new firmware");
     delay(500);
     esp_restart();
@@ -366,40 +373,75 @@ static void check_for_update()
     }
 
     if(!is_newer_version(remote_version, current_version)) {
-        char message[96];
-        snprintf(message, sizeof(message), "Firmware aktuell (%s)", APP_VERSION);
-        set_update_status(message, 0);
+        set_update_status("Du bist auf dem neuesten Stand.", 0);
         return;
     }
 
     char message[96];
-    snprintf(message, sizeof(message), "Version %s gefunden", version);
-    set_update_status(message, 0);
-    download_firmware(url, sha256);
+    if(strlcpy(pending_firmware_url, url, sizeof(pending_firmware_url)) >=
+           sizeof(pending_firmware_url) ||
+       strlcpy(pending_firmware_sha256, sha256,
+               sizeof(pending_firmware_sha256)) >=
+           sizeof(pending_firmware_sha256)) {
+        set_update_status("Update-Information ist zu lang", 0);
+        return;
+    }
+
+    snprintf(message, sizeof(message),
+             "Version %s verfügbar. Möchtest du sie installieren?", version);
+    portENTER_CRITICAL(&status_mux);
+    update_available = true;
+    update_decision_pending = false;
+    strlcpy(update_status, message, sizeof(update_status));
+    download_progress = 0;
+    portEXIT_CRITICAL(&status_mux);
 }
 
 static void ota_worker(void *)
 {
-    uint32_t last_check_ms = 0;
     for(;;) {
-        if(WiFi.status() == WL_CONNECTED) {
+        portENTER_CRITICAL(&status_mux);
+        const bool decision_pending = update_decision_pending;
+        const bool install_requested = update_install_requested;
+        char firmware_url[sizeof(pending_firmware_url)];
+        char firmware_sha256[sizeof(pending_firmware_sha256)];
+        if(decision_pending) {
+            update_decision_pending = false;
+            update_install_requested = false;
+            strlcpy(firmware_url, pending_firmware_url, sizeof(firmware_url));
+            strlcpy(firmware_sha256, pending_firmware_sha256,
+                    sizeof(firmware_sha256));
+        }
+        const bool check_requested = update_check_requested;
+        portEXIT_CRITICAL(&status_mux);
+
+        if(decision_pending) {
+            if(!install_requested) {
+                set_update_status("Update nicht installiert.", 0);
+            } else if(WiFi.status() != WL_CONNECTED) {
+                set_update_status("WLAN-Verbindung unterbrochen.", 0);
+            } else {
+                download_firmware(firmware_url, firmware_sha256);
+            }
+            continue;
+        }
+
+        if(check_requested && WiFi.status() == WL_CONNECTED) {
             if(!system_time_is_valid()) {
-                last_check_ms = 0;
                 set_update_status("Warte auf sichere Uhrzeitsynchronisierung...", 0);
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
             }
 
-            const uint32_t now = millis();
-            if(last_check_ms == 0 ||
-               static_cast<uint32_t>(now - last_check_ms) >= UPDATE_CHECK_INTERVAL_MS) {
-                last_check_ms = now;
+            portENTER_CRITICAL(&status_mux);
+            const bool manual_check = update_check_requested;
+            update_check_requested = false;
+            portEXIT_CRITICAL(&status_mux);
+            if(manual_check) {
                 check_for_update();
             }
-            vTaskDelay(pdMS_TO_TICKS(100));
         } else {
-            last_check_ms = 0;
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(250));
         }
     }
 }
@@ -462,16 +504,29 @@ extern "C" void wifi_ota_screen_enter(void)
     if(WiFi.status() == WL_CONNECTED || connection_started) return;
 
     if(have_credentials) {
-        char message[64];
-        snprintf(message, sizeof(message), "Verbinde mit %s...", pending_ssid);
-        set_wifi_status(message);
-        connection_started_ms = millis();
-        connection_started = true;
-        WiFi.begin(pending_ssid, pending_password);
+        saved_connection_pending = true;
+        set_wifi_status("Suche nach verfügbaren WLANs...");
     } else {
         set_wifi_status("Bitte WLAN auswählen und verbinden");
-        wifi_ota_start_scan();
     }
+    wifi_ota_start_scan();
+}
+
+extern "C" void wifi_ota_networks_displayed(void)
+{
+    if(!saved_connection_pending || !scan_results_ready_for_display ||
+       WiFi.status() == WL_CONNECTED || connection_started) {
+        return;
+    }
+
+    saved_connection_pending = false;
+    scan_results_ready_for_display = false;
+    char message[64];
+    snprintf(message, sizeof(message), "Verbinde mit %s...", pending_ssid);
+    set_wifi_status(message);
+    connection_started_ms = millis();
+    connection_started = true;
+    WiFi.begin(pending_ssid, pending_password);
 }
 
 extern "C" void wifi_ota_loop(void)
@@ -558,12 +613,14 @@ extern "C" void wifi_ota_loop(void)
         if(result >= 0) {
             scan_in_progress = false;
             scan_generation++;
+            scan_results_ready_for_display = true;
             if(WiFi.status() != WL_CONNECTED && !user_connection_pending) {
                 set_wifi_status("WLAN-Suche abgeschlossen");
             }
         } else if(result == WIFI_SCAN_FAILED) {
             scan_in_progress = false;
             scan_generation++;
+            scan_results_ready_for_display = true;
             if(WiFi.status() != WL_CONNECTED && !user_connection_pending) {
                 set_wifi_status("WLAN-Suche fehlgeschlagen");
             }
@@ -591,6 +648,7 @@ extern "C" void wifi_ota_start_scan(void)
         return;
     }
     scan_in_progress = true;
+    scan_results_ready_for_display = false;
     set_wifi_status("Suche nach WLANs...");
 }
 
@@ -600,7 +658,8 @@ extern "C" int wifi_ota_network_count(void)
     return result >= 0 ? result : 0;
 }
 
-extern "C" bool wifi_ota_get_network(int index, char *ssid, size_t ssid_size)
+extern "C" bool wifi_ota_get_network(int index, char *ssid, size_t ssid_size,
+                                     int *signal_percent, bool *secured)
 {
     if(ssid == nullptr || ssid_size == 0 || index < 0 ||
        index >= wifi_ota_network_count()) {
@@ -609,6 +668,14 @@ extern "C" bool wifi_ota_get_network(int index, char *ssid, size_t ssid_size)
 
     const String network_name = WiFi.SSID(index);
     network_name.toCharArray(ssid, ssid_size);
+    if(signal_percent != nullptr) {
+        *signal_percent = (WiFi.RSSI(index) + 100) * 2;
+        if(*signal_percent < 0) *signal_percent = 0;
+        if(*signal_percent > 100) *signal_percent = 100;
+    }
+    if(secured != nullptr) {
+        *secured = WiFi.encryptionType(index) != WIFI_AUTH_OPEN;
+    }
     return ssid[0] != '\0';
 }
 
@@ -625,6 +692,49 @@ extern "C" void wifi_ota_connect(const char *ssid, const char *password)
     connection_started = true;
     connection_started_ms = millis();
     set_wifi_status("Verbindung wird hergestellt...");
+}
+
+extern "C" bool wifi_ota_request_update_check(void)
+{
+    if(WiFi.status() != WL_CONNECTED) {
+        set_update_status("Bitte zuerst WLAN verbinden", 0);
+        return false;
+    }
+    if(ota_busy) {
+        set_update_status("Ein Update läuft bereits", download_progress);
+        return false;
+    }
+
+    portENTER_CRITICAL(&status_mux);
+    if(update_decision_pending) {
+        portEXIT_CRITICAL(&status_mux);
+        set_update_status("Update-Auswahl wird bearbeitet", download_progress);
+        return false;
+    }
+    update_check_requested = true;
+    update_available = false;
+    strlcpy(update_status, "Update-Prüfung wird gestartet...", sizeof(update_status));
+    download_progress = 0;
+    portEXIT_CRITICAL(&status_mux);
+    return true;
+}
+
+extern "C" bool wifi_ota_confirm_update(bool install)
+{
+    portENTER_CRITICAL(&status_mux);
+    if(!update_available || update_decision_pending) {
+        portEXIT_CRITICAL(&status_mux);
+        return false;
+    }
+
+    update_available = false;
+    update_decision_pending = true;
+    update_install_requested = install;
+    strlcpy(update_status,
+            install ? "Update wird vorbereitet..." : "Update nicht installiert.",
+            sizeof(update_status));
+    portEXIT_CRITICAL(&status_mux);
+    return true;
 }
 
 extern "C" void wifi_ota_get_snapshot(wifi_ota_snapshot_t *snapshot)
@@ -644,6 +754,7 @@ extern "C" void wifi_ota_get_snapshot(wifi_ota_snapshot_t *snapshot)
     strlcpy(snapshot->ip, WiFi.localIP().toString().c_str(), sizeof(snapshot->ip));
 
     portENTER_CRITICAL(&status_mux);
+    snapshot->update_available = update_available;
     strlcpy(snapshot->wifi_status, wifi_status, sizeof(snapshot->wifi_status));
     strlcpy(snapshot->update_status, update_status, sizeof(snapshot->update_status));
     portEXIT_CRITICAL(&status_mux);

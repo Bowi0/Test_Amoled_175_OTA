@@ -22,6 +22,7 @@ extern "C" {
 #include "screens/ui_Screen2.h"
 #include "screens/ui_Screen3.h"
 #include "screens/ui_Screen4.h"
+#include "screens/ui_Screen5.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -40,6 +41,9 @@ void ui_init(void);
 void ui_destroy(void);
 void ui_screen4_show(void);
 void ui_screen4_update(void);
+void ui_screen5_screen_init(void);
+void ui_screen5_screen_destroy(void);
+void ui_screen5_update(void);
 
 #ifdef __cplusplus
 } /*extern "C"*/

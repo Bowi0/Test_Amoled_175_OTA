@@ -82,6 +82,7 @@ void loop()
 {
   wifi_ota_loop();
   ui_screen4_update();
+  ui_screen5_update();
 
   if(PRESSURE_DEMO_ENABLED) update_pressure_demo();
   else update_pressure_from_sensor();
