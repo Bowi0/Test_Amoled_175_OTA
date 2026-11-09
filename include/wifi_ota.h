@@ -11,6 +11,7 @@ extern "C" {
 
 typedef struct {
     bool connected;
+    bool connecting;
     bool scanning;
     bool updating;
     bool update_available;
@@ -33,7 +34,8 @@ void wifi_ota_start_scan(void);
 int wifi_ota_network_count(void);
 bool wifi_ota_get_network(int index, char *ssid, size_t ssid_size,
                           int *signal_percent, bool *secured);
-void wifi_ota_connect(const char *ssid, const char *password);
+bool wifi_ota_connect(const char *ssid, const char *password);
+bool wifi_ota_disconnect(void);
 bool wifi_ota_request_update_check(void);
 bool wifi_ota_confirm_update(bool install);
 void wifi_ota_get_snapshot(wifi_ota_snapshot_t *snapshot);

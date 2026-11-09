@@ -17,8 +17,6 @@ extern void ui_event_Screen1(lv_event_t * e);
 extern lv_obj_t * ui_Screen1;
 extern lv_obj_t * ui_BackgroundScreen1;
 extern lv_obj_t * ui_Zeiger;
-extern lv_obj_t * ui_Label1;
-extern lv_obj_t * ui_Label2;
 void ui_set_pressure_bar(float pressure_bar);
 // CUSTOM VARIABLES
 extern lv_obj_t * uic_BackgroundScreen1;
@@ -29,4 +27,3 @@ extern lv_obj_t * uic_Zeiger;
 #endif
 
 #endif
-

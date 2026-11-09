@@ -11,8 +11,6 @@ lv_obj_t * uic_BackgroundScreen1;
 lv_obj_t * ui_Screen1 = NULL;
 lv_obj_t * ui_BackgroundScreen1 = NULL;
 lv_obj_t * ui_Zeiger = NULL;
-lv_obj_t * ui_Label1 = NULL;
-lv_obj_t * ui_Label2 = NULL;
 lv_obj_t * ui_LabelFPS = NULL;
 
 #include "esp_timer.h" // WICHTIG: Füge diesen Header ganz oben in ui_Screen1.c ein!
@@ -28,15 +26,13 @@ void ui_set_pressure_bar(float pressure_bar)
         lv_img_set_angle(ui_Zeiger, angle);
     }
 
-    // 2. Label NUR einmal pro Sekunde (alle 1000 ms) aktualisieren
-    static uint32_t last_label_update = 0;
+    static uint32_t last_pressure_send = 0;
     
     // esp_timer_get_time() liefert Mikrosekunden, / 1000 macht daraus Millisekunden
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000); 
 
-    if(ui_Label1 && (now - last_label_update >= 100)) {
-        last_label_update = now;
-        lv_label_set_text_fmt(ui_Label1, "%.2f", (double)pressure_bar);
+    if(ui_Screen1 && (now - last_pressure_send >= 100)) {
+        last_pressure_send = now;
         ble_send_pressure(pressure_bar);
     }
 }
@@ -83,27 +79,6 @@ void ui_Screen1_screen_init(void)
     lv_img_set_pivot(ui_Zeiger, 19, 165);
     lv_img_set_antialias(ui_Zeiger, true);
 
-    ui_Label1 = lv_label_create(ui_Screen1);
-    lv_obj_set_width(ui_Label1, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Label1, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_Label1, 0);
-    lv_obj_set_y(ui_Label1, 60);
-    lv_obj_set_align(ui_Label1, LV_ALIGN_CENTER);
-    lv_obj_set_style_text_color(ui_Label1, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_Label1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_Label1, &lv_font_montserrat_40, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    ui_Label2 = lv_label_create(ui_Screen1);
-    lv_obj_set_width(ui_Label2, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Label2, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_Label2, 0);
-    lv_obj_set_y(ui_Label2, -80);
-    lv_obj_set_align(ui_Label2, LV_ALIGN_CENTER);
-    lv_label_set_text(ui_Label2, "-BAR-");
-    lv_obj_set_style_text_color(ui_Label2, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(ui_Label2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_Label2, &lv_font_montserrat_20, LV_PART_MAIN | LV_STATE_DEFAULT);
-
     ui_set_pressure_bar(0.0f);
 
     lv_obj_add_event_cb(ui_Screen1, ui_event_Screen1, LV_EVENT_ALL, NULL);
@@ -121,7 +96,4 @@ void ui_Screen1_screen_destroy(void)
     ui_BackgroundScreen1 = NULL;
     uic_Zeiger = NULL;
     ui_Zeiger = NULL;
-    ui_Label1 = NULL;
-    ui_Label2 = NULL;
-
 }

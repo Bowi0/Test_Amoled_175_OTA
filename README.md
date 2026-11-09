@@ -60,12 +60,21 @@ interrupt on GPIO 11. The pin assignments and controller selection match
 
 Screen4 presents available Wi-Fi networks in a scrollable list with signal
 strength indicators. The list refreshes automatically while Screen4 is open,
-and the connected network is highlighted in blue. Select a network and tap
+and the connected network's name is displayed in blue. The selected network
+has a blue border, including when it is connected. Select a network and tap
 Connect to open the password entry view; the touch keyboard is shown only in
-that step. Credentials are saved locally in NVS on the ESP32 and are not part
+that step. The keyboard is centered on the round display, and pressing a
+character shows an enlarged preview above the touch point. Credentials are
+saved locally in NVS on the ESP32 and are not part
 of the repository. The device starts on Screen1.
+After a successful connection, the confirmation closes automatically after one
+second; connection errors remain visible until acknowledged.
+Selecting the connected network changes the button to “Trennen”. Disconnecting
+keeps the saved credentials but prevents automatic reconnection until the user
+connects again or the device restarts.
 Wi-Fi scanning and connection are only started after Screen4 is opened (swipe
 left from Screen3); the Wi-Fi and OTA subsystems are initialized at that point.
+The screen is rendered before this initialization and scanning begin.
 Screen4 starts a scan and displays the available networks before it attempts to
 connect with saved credentials. Swiping left from Screen4
 opens Screen5, which shows the update status and current firmware version and
@@ -80,8 +89,10 @@ whether to install it; the firmware downloads it only after confirmation and
 shows the download percentage. It
 verifies HTTPS certificates using the ESP-IDF certificate bundle (after
 synchronizing the system clock with NTP) and checks the firmware SHA-256 before
-switching to the new app slot and rebooting. The BOOT button no longer enters
-deep sleep.
+switching to the new app slot and rebooting. Hold the BOOT button for at least
+one second and release it to restart the device without erasing saved data.
+Restart is ignored while a firmware update is being installed. Releasing BOOT
+before the restart keeps GPIO0 from selecting the download mode.
 Bluetooth initializes only when enabled from Screen3 to preserve internal RAM
 for HTTPS updates.
 

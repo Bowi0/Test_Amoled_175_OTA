@@ -11,11 +11,46 @@
 #include "CST9217.h"
 
 static constexpr uint8_t PRESSURE_SENSOR_PIN = 2;
+static constexpr uint8_t BOOT_BUTTON_PIN = 0;
+static constexpr uint32_t BOOT_BUTTON_DEBOUNCE_MS = 30;
+static constexpr uint32_t BOOT_BUTTON_RESTART_MS = 1000;
 static constexpr uint32_t PRESSURE_UPDATE_INTERVAL_MS = 16;
 static constexpr bool PRESSURE_DEMO_ENABLED = true;
 static constexpr bool INTRO_ENABLED = true;
 static constexpr uint32_t PRESSURE_DEMO_PERIOD_MS = 5000;
 static constexpr uint32_t PRESSURE_DEMO_UPDATE_INTERVAL_MS = 16;
+
+static void update_boot_button()
+{
+  static bool raw_pressed = false;
+  static bool stable_pressed = false;
+  static uint32_t raw_changed_ms = 0;
+  static uint32_t pressed_ms = 0;
+
+  const uint32_t now = millis();
+  const bool pressed = digitalRead(BOOT_BUTTON_PIN) == LOW;
+  if(pressed != raw_pressed) {
+    raw_pressed = pressed;
+    raw_changed_ms = now;
+  }
+  if(raw_pressed != stable_pressed &&
+     now - raw_changed_ms >= BOOT_BUTTON_DEBOUNCE_MS) {
+    stable_pressed = raw_pressed;
+    if(stable_pressed) {
+      pressed_ms = raw_changed_ms;
+    } else {
+      if(raw_changed_ms - pressed_ms >= BOOT_BUTTON_RESTART_MS) {
+        if(wifi_ota_is_busy()) {
+          Serial.println("BOOT: restart ignored while firmware update is running");
+        } else {
+          Serial.println("BOOT: restarting");
+          Serial.flush();
+          ESP.restart();
+        }
+      }
+    }
+  }
+}
 
 static void update_pressure_from_sensor()
 {
@@ -53,6 +88,7 @@ static void update_pressure_demo()
 void setup()
 {
   Serial.begin(115200);
+  pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
   ESP_ERROR_CHECK(lcd_resume_from_sleep());
 
   // 1. NVS Speichersystem für Bluetooth initialisieren (WICHTIG gegen Absturz!)
@@ -80,6 +116,7 @@ void setup()
 
 void loop()
 {
+  update_boot_button();
   wifi_ota_loop();
   ui_screen4_update();
   ui_screen5_update();

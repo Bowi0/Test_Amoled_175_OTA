@@ -22,6 +22,7 @@ static constexpr char MANIFEST_URL[] =
 static constexpr char FIRMWARE_URL_PREFIX[] =
     "https://github.com/Bowi0/Test_Amoled_175_OTA/releases/";
 static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 20000;
+static constexpr uint32_t WIFI_SCAN_TIMEOUT_MS = 20000;
 static constexpr time_t MINIMUM_VALID_UNIX_TIME = 1704067200;
 static constexpr size_t MANIFEST_MAX_SIZE = 2048;
 
@@ -35,6 +36,7 @@ static bool connection_started;
 static bool time_sync_started;
 static bool time_was_synchronized;
 static uint32_t connection_started_ms;
+static uint32_t scan_started_ms;
 static uint32_t last_wifi_update_ms;
 static uint32_t time_sync_started_ms;
 static uint32_t scan_generation;
@@ -50,6 +52,7 @@ static bool update_decision_pending;
 static bool update_install_requested;
 static bool saved_connection_pending;
 static bool scan_results_ready_for_display;
+static bool manually_disconnected;
 static char pending_firmware_url[256];
 static char pending_firmware_sha256[65];
 static portMUX_TYPE status_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -503,13 +506,12 @@ extern "C" void wifi_ota_screen_enter(void)
 {
     if(WiFi.status() == WL_CONNECTED || connection_started) return;
 
-    if(have_credentials) {
+    if(have_credentials && !manually_disconnected) {
         saved_connection_pending = true;
         set_wifi_status("Suche nach verfügbaren WLANs...");
     } else {
         set_wifi_status("Bitte WLAN auswählen und verbinden");
     }
-    wifi_ota_start_scan();
 }
 
 extern "C" void wifi_ota_networks_displayed(void)
@@ -537,6 +539,7 @@ extern "C" void wifi_ota_loop(void)
 
     const bool connected = WiFi.status() == WL_CONNECTED;
     if(connected) {
+        connection_started = false;
         if(!time_sync_started) {
             configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
             time_sync_started = true;
@@ -600,7 +603,7 @@ extern "C" void wifi_ota_loop(void)
             pending_password[0] = '\0';
             set_wifi_status("Verbindung fehlgeschlagen — Passwort prüfen");
             Serial.println("WiFi: connection attempt timed out");
-        } else if(!user_connection_pending && have_credentials &&
+        } else if(!user_connection_pending && connection_started && have_credentials &&
                   WiFi.status() == WL_IDLE_STATUS) {
             set_wifi_status("Verbinde mit gespeichertem WLAN...");
         } else if(!have_credentials && !scan_in_progress) {
@@ -624,6 +627,15 @@ extern "C" void wifi_ota_loop(void)
             if(WiFi.status() != WL_CONNECTED && !user_connection_pending) {
                 set_wifi_status("WLAN-Suche fehlgeschlagen");
             }
+        } else if(now - scan_started_ms >= WIFI_SCAN_TIMEOUT_MS) {
+            WiFi.scanDelete();
+            scan_in_progress = false;
+            scan_generation++;
+            scan_results_ready_for_display = true;
+            if(WiFi.status() != WL_CONNECTED && !user_connection_pending) {
+                set_wifi_status("WLAN-Suche abgebrochen — erneut versuchen");
+            }
+            Serial.println("WiFi: scan timed out");
         }
     }
 }
@@ -640,16 +652,29 @@ extern "C" bool wifi_ota_is_busy(void)
 
 extern "C" void wifi_ota_start_scan(void)
 {
-    if(scan_in_progress || ota_busy) return;
+    if(scan_in_progress || ota_busy || connection_started ||
+       user_connection_pending) {
+        return;
+    }
     WiFi.scanDelete();
     const int result = WiFi.scanNetworks(true, false);
     if(result == WIFI_SCAN_FAILED) {
+        scan_in_progress = false;
+        scan_generation++;
+        scan_results_ready_for_display = true;
         set_wifi_status("WLAN-Suche konnte nicht gestartet werden");
+        Serial.println("WiFi: scan could not be started");
         return;
     }
-    scan_in_progress = true;
-    scan_results_ready_for_display = false;
-    set_wifi_status("Suche nach WLANs...");
+    scan_in_progress = result == WIFI_SCAN_RUNNING;
+    scan_started_ms = millis();
+    scan_results_ready_for_display = !scan_in_progress;
+    if(scan_in_progress) {
+        set_wifi_status("Suche nach WLANs...");
+    } else {
+        scan_generation++;
+        set_wifi_status("WLAN-Suche abgeschlossen");
+    }
 }
 
 extern "C" int wifi_ota_network_count(void)
@@ -679,10 +704,23 @@ extern "C" bool wifi_ota_get_network(int index, char *ssid, size_t ssid_size,
     return ssid[0] != '\0';
 }
 
-extern "C" void wifi_ota_connect(const char *ssid, const char *password)
+extern "C" bool wifi_ota_connect(const char *ssid, const char *password)
 {
-    if(ssid == nullptr || *ssid == '\0' || ota_busy) return;
+    if(ssid == nullptr || *ssid == '\0' || ota_busy) return false;
 
+    if(!WiFi.setAutoReconnect(true)) {
+        Serial.println("WiFi: failed to enable automatic reconnection");
+        set_wifi_status("WLAN-Verbindung konnte nicht gestartet werden");
+        return false;
+    }
+    manually_disconnected = false;
+    saved_connection_pending = false;
+    if(scan_in_progress) {
+        WiFi.scanDelete();
+        scan_in_progress = false;
+        scan_results_ready_for_display = false;
+        scan_generation++;
+    }
     strlcpy(pending_ssid, ssid, sizeof(pending_ssid));
     strlcpy(pending_password, password == nullptr ? "" : password,
             sizeof(pending_password));
@@ -692,6 +730,34 @@ extern "C" void wifi_ota_connect(const char *ssid, const char *password)
     connection_started = true;
     connection_started_ms = millis();
     set_wifi_status("Verbindung wird hergestellt...");
+    return true;
+}
+
+extern "C" bool wifi_ota_disconnect(void)
+{
+    if(ota_busy || WiFi.status() != WL_CONNECTED) {
+        set_wifi_status("WLAN-Verbindung konnte nicht getrennt werden");
+        return false;
+    }
+
+    if(!WiFi.setAutoReconnect(false)) {
+        Serial.println("WiFi: failed to disable automatic reconnection");
+        set_wifi_status("WLAN-Verbindung konnte nicht getrennt werden");
+        return false;
+    }
+    if(!WiFi.disconnect(false, false)) {
+        WiFi.setAutoReconnect(true);
+        Serial.println("WiFi: disconnect failed");
+        set_wifi_status("WLAN-Verbindung konnte nicht getrennt werden");
+        return false;
+    }
+
+    manually_disconnected = true;
+    saved_connection_pending = false;
+    connection_started = false;
+    user_connection_pending = false;
+    set_wifi_status("WLAN-Verbindung getrennt");
+    return true;
 }
 
 extern "C" bool wifi_ota_request_update_check(void)
@@ -742,6 +808,7 @@ extern "C" void wifi_ota_get_snapshot(wifi_ota_snapshot_t *snapshot)
     if(snapshot == nullptr) return;
 
     snapshot->connected = WiFi.status() == WL_CONNECTED;
+    snapshot->connecting = connection_started || user_connection_pending;
     snapshot->scanning = scan_in_progress;
     snapshot->updating = ota_busy;
     snapshot->progress = download_progress;
