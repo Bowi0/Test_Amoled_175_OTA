@@ -40,15 +40,13 @@ void ui_set_pressure_bar(float pressure_bar)
 // event funtions
 void ui_event_Screen1(lv_event_t * e)
 {
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_LEFT) {
-        lv_indev_wait_release(lv_indev_get_act());
-        _ui_screen_change(&ui_Screen2, LV_SCR_LOAD_ANIM_NONE, 0, 0, &ui_Screen2_screen_init);
-    }
-    if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) {
-        lv_indev_wait_release(lv_indev_get_act());
-        _ui_screen_change(&ui_Screen5, LV_SCR_LOAD_ANIM_NONE, 0, 0, &ui_Screen5_screen_init);
+    if(lv_event_get_code(e) != LV_EVENT_GESTURE || ui_Switches == NULL) return;
+    lv_indev_t *indev = lv_indev_get_act();
+    if(indev == NULL) return;
+    lv_dir_t direction = lv_indev_get_gesture_dir(indev);
+    if(direction == LV_DIR_LEFT || direction == LV_DIR_RIGHT) {
+        lv_indev_wait_release(indev);
+        lv_scr_load(ui_Switches);
     }
 }
 

@@ -1,8 +1,15 @@
 SET(SOURCES screens/ui_Screen1.c
-    screens/ui_Screen2.c
-    screens/ui_Screen3.c
+    screens/ui_Clock.c
+    screens/ui_Switches.c
     screens/ui_Screen4.c
+    screens/ui_Screen5.c
+    screens/ui_Screen6.c
     ui.c
+    ui_theme.c
+    ui_german_font.c
+    ui_font_montserrat_de_14.c
+    ui_font_montserrat_de_18.c
+    ui_font_montserrat_de_20.c
     components/ui_comp_hook.c
     ui_helpers.c
     ui_events.c

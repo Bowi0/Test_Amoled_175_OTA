@@ -19,10 +19,11 @@ extern "C" {
 ///////////////////// SCREENS ////////////////////
 
 #include "screens/ui_Screen1.h"
-#include "screens/ui_Screen2.h"
-#include "screens/ui_Screen3.h"
+#include "screens/ui_Clock.h"
+#include "screens/ui_Switches.h"
 #include "screens/ui_Screen4.h"
 #include "screens/ui_Screen5.h"
+#include "screens/ui_Screen6.h"
 
 ///////////////////// VARIABLES ////////////////////
 
@@ -38,8 +39,10 @@ LV_IMG_DECLARE(ui_img_1470449450);    // assets/2323Bluetooth-Icon-symbol-of-wir
 
 // UI INIT
 void ui_init(void);
+void ui_init_step(void);
 void ui_destroy(void);
 void ui_screen4_show(void);
+bool ui_screen4_can_open_quick_settings(void);
 void ui_screen4_update(void);
 void ui_screen5_screen_init(void);
 void ui_screen5_screen_destroy(void);

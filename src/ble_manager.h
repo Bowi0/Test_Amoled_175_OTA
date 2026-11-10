@@ -9,6 +9,7 @@ extern "C" {
 
 void ble_init(void);
 void ble_toggle(void);
+bool ble_set_enabled(bool enabled);
 bool ble_is_active(void);
 void ble_send_pressure(float pressure);
 

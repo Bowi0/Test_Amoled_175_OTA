@@ -33,6 +33,7 @@ esp_err_t lcd_draw_intro_frame(uint16_t x, uint16_t y, uint16_t width,
                                uint16_t height, uint16_t *pixels);
 esp_err_t lcd_draw_intro_frame_2x(uint16_t *pixels, uint64_t *scale_time_us,
                                   uint64_t *transfer_time_us);
+void lcd_release_intro_buffer(void);
 esp_err_t lcd_prepare_for_sleep(void);
 esp_err_t lcd_resume_from_sleep(void);
 static void example_lvgl_touch_cb(lv_indev_drv_t *drv, lv_indev_data_t *data);

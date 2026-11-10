@@ -1,6 +1,8 @@
 #include "../ui.h"
 #include "../ui_german_font.h"
+#include "../ui_theme.h"
 #include "wifi_ota.h"
+#include "device_settings.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
@@ -23,6 +25,7 @@ static lv_obj_t *connection_message;
 static lv_obj_t *connection_done_button;
 static lv_obj_t *connect_button;
 static lv_obj_t *connect_label;
+static lv_obj_t *back_button;
 static lv_obj_t *cancel_button;
 static lv_obj_t *password_ok_button;
 static lv_obj_t *list_heading;
@@ -31,6 +34,7 @@ static lv_obj_t *wifi_arcs[4];
 static uint32_t last_scan_generation = UINT32_MAX;
 static uint32_t last_ui_update_ms;
 static uint32_t last_auto_scan_ms;
+static bool scan_on_connect_finished;
 static uint32_t connection_success_ms;
 #define WIFI_SCAN_INTERVAL_MS 15000
 #define CONNECTION_SUCCESS_DISPLAY_MS 1000
@@ -38,26 +42,21 @@ static uint32_t connection_success_ms;
 #define KEY_PREVIEW_OFFSET 40
 static bool keyboard_visible;
 static bool previous_wifi_connected;
-static bool wifi_ota_initialized;
 static bool screen_start_pending;
 static bool screen_initial_refresh_started;
 static bool selected_network_secured;
 static bool connection_dialog_active;
 static bool connection_success_visible;
+static bool saved_network_attempt;
 static char selected_ssid[33];
 
 static void set_button_style(lv_obj_t *button, uint32_t color)
 {
-    lv_obj_set_style_bg_color(button, lv_color_hex(color),
-                              LV_PART_MAIN | LV_STATE_ANY);
-    lv_obj_set_style_bg_opa(button, LV_OPA_COVER,
-                            LV_PART_MAIN | LV_STATE_ANY);
+    ui_theme_style_button(button, color);
     lv_obj_set_style_border_width(button, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(button, 15, LV_PART_MAIN);
     lv_obj_set_style_text_color(button, lv_color_white(), LV_PART_MAIN);
     lv_obj_set_style_text_font(button, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(button, lv_color_white(),
-                                LV_PART_MAIN | LV_STATE_ANY);
 }
 
 static void create_wifi_icon(void)
@@ -68,19 +67,9 @@ static void create_wifi_icon(void)
 
     for(size_t index = 0; index < sizeof(arc_sizes) / sizeof(arc_sizes[0]); index++) {
         const lv_coord_t size = arc_sizes[index];
-        lv_obj_t *arc = lv_arc_create(ui_Screen4);
-        lv_obj_set_size(arc, size, size);
-        lv_obj_set_pos(arc, icon_center_x - size / 2, icon_bottom_y - size);
-        lv_arc_set_bg_angles(arc, 210, 330);
-        lv_arc_set_angles(arc, 210, 330);
-        lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
-        lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
-        lv_obj_set_style_arc_width(arc, 2, LV_PART_MAIN);
-        lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
-        lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
-        lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
-        wifi_arcs[index] = arc;
+        wifi_arcs[index] = ui_theme_create_wifi_arc(ui_Screen4, size,
+                                                     icon_center_x - size / 2,
+                                                     icon_bottom_y - size);
     }
 }
 
@@ -92,6 +81,7 @@ static void set_password_view(bool visible)
         lv_obj_add_flag(list_heading, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(connect_button, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(back_button, LV_OBJ_FLAG_HIDDEN);
         for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
             lv_obj_add_flag(wifi_arcs[index], LV_OBJ_FLAG_HIDDEN);
         }
@@ -103,6 +93,7 @@ static void set_password_view(bool visible)
         lv_obj_clear_flag(list_heading, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(connect_button, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(back_button, LV_OBJ_FLAG_HIDDEN);
         for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
             lv_obj_clear_flag(wifi_arcs[index], LV_OBJ_FLAG_HIDDEN);
         }
@@ -194,7 +185,7 @@ static void set_network_row_style(lv_obj_t *row, bool selected)
     lv_obj_set_style_border_width(row, selected ? 2 : 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(row,
                                   lv_color_hex(selected
-                                                   ? 0x4FA8FF : 0x263540),
+                                                   ? ui_theme_colors(device_theme())->accent : 0x263540),
                                   LV_PART_MAIN);
 }
 
@@ -211,7 +202,7 @@ static void draw_signal_bars(lv_obj_t *row, int signal_percent)
         lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_color(bar,
                                   lv_color_hex(signal_percent >= threshold
-                                                   ? 0x4FA8FF : 0x394550),
+                                                   ? ui_theme_colors(device_theme())->accent : 0x394550),
                                   LV_PART_MAIN);
         lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
     }
@@ -261,7 +252,7 @@ static void network_row_event(lv_event_t *event)
         const bool selected = strcmp(selected_ssid, network_ssid) == 0;
         set_network_row_style(row, selected);
         lv_obj_set_style_text_color(lv_obj_get_child(row, 0),
-                                    lv_color_hex(connected ? 0x78BDFF : 0xFFFFFF),
+                                    lv_color_hex(connected ? ui_theme_colors(device_theme())->light : 0xFFFFFF),
                                     LV_PART_MAIN);
     }
     update_connect_button(&snapshot);
@@ -282,7 +273,8 @@ static void refresh_network_list(bool scanning)
             strstr(snapshot.wifi_status, "abgebrochen") != NULL ||
             strstr(snapshot.wifi_status, "nicht gestartet") != NULL;
         lv_label_set_text(empty_label,
-                          scanning ? "Suche nach Netzwerken..."
+                          !device_wifi_enabled() ? "WLAN ist ausgeschaltet"
+                          : scanning ? "Suche nach Netzwerken..."
                                    : scan_failed
                                          ? "Suche fehlgeschlagen — erneut versuchen"
                                          : "Keine Netzwerke gefunden");
@@ -338,7 +330,7 @@ static void refresh_network_list(bool scanning)
         lv_obj_align(name_label, LV_ALIGN_LEFT_MID, 0, 0);
         lv_obj_set_style_text_font(name_label, ui_german_font_14(), LV_PART_MAIN);
         lv_obj_set_style_text_color(name_label,
-                                    lv_color_hex(connected ? 0x78BDFF : 0xFFFFFF),
+                                    lv_color_hex(connected ? ui_theme_colors(device_theme())->light : 0xFFFFFF),
                                     LV_PART_MAIN);
         lv_obj_clear_flag(name_label, LV_OBJ_FLAG_CLICKABLE);
 
@@ -375,6 +367,7 @@ static void submit_password(lv_event_t *event)
         lv_obj_clear_flag(password_error_label, LV_OBJ_FLAG_HIDDEN);
         return;
     }
+    saved_network_attempt = false;
     lv_textarea_set_text(password_input, "");
     lv_label_set_text(password_error_label, "");
     set_password_view(false);
@@ -431,10 +424,34 @@ static void connect_button_event(lv_event_t *event)
         return;
     }
 
+    if(wifi_ota_has_saved_network(selected_ssid)) {
+        if(!wifi_ota_connect_saved(selected_ssid)) {
+            show_connection_result("Verbindung konnte nicht gestartet werden");
+            lv_obj_clear_flag(connection_overlay, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(connection_overlay);
+            return;
+        }
+        saved_network_attempt = true;
+        connection_dialog_active = true;
+        connection_success_visible = false;
+        lv_label_set_text_fmt(connection_message, "Verbinde mit %.32s...", selected_ssid);
+        lv_obj_clear_flag(connection_spinner, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(connection_done_button, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(connection_overlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(connection_overlay);
+        return;
+    }
+
     lv_textarea_set_text(password_input, "");
     lv_label_set_text(password_error_label, "");
     lv_obj_add_flag(password_error_label, LV_OBJ_FLAG_HIDDEN);
     set_password_view(true);
+}
+
+static void back_button_event(lv_event_t *event)
+{
+    if(lv_event_get_code(event) == LV_EVENT_CLICKED)
+        lv_scr_load(ui_Screen6);
 }
 
 static void screen_event(lv_event_t *event)
@@ -442,6 +459,25 @@ static void screen_event(lv_event_t *event)
     if(lv_event_get_target(event) != ui_Screen4) return;
 
     if(lv_event_get_code(event) == LV_EVENT_SCREEN_LOADED) {
+        const ui_theme_colors_t *colors = ui_theme_colors(device_theme());
+        set_button_style(connect_button, colors->button);
+        set_button_style(back_button, colors->button);
+        set_button_style(cancel_button, colors->button);
+        set_button_style(password_ok_button, colors->button);
+        set_button_style(connection_done_button, colors->button);
+        lv_obj_set_style_border_color(password_input, lv_color_hex(colors->accent), LV_PART_MAIN);
+        lv_obj_set_style_border_color(password_input, lv_color_hex(colors->accent), LV_PART_MAIN | LV_STATE_FOCUSED);
+        lv_obj_set_style_border_color(key_preview, lv_color_hex(colors->accent), LV_PART_MAIN);
+        lv_obj_set_style_border_color(connection_panel, lv_color_hex(colors->accent), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(connection_spinner, lv_color_hex(colors->accent), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(keyboard, lv_color_hex(colors->button), LV_PART_ITEMS);
+        lv_obj_set_style_bg_color(keyboard, lv_color_darken(lv_color_hex(colors->button), LV_OPA_20),
+                                  LV_PART_ITEMS | LV_STATE_PRESSED);
+        lv_obj_set_style_text_color(keyboard, lv_color_white(), LV_PART_ITEMS);
+        lv_obj_set_style_bg_color(wifi_list, lv_color_hex(colors->accent), LV_PART_SCROLLBAR);
+        wifi_ota_snapshot_t snapshot = {0};
+        wifi_ota_get_snapshot(&snapshot);
+        refresh_network_list(snapshot.scanning);
         screen_start_pending = true;
         screen_initial_refresh_started = false;
         return;
@@ -452,28 +488,13 @@ static void screen_event(lv_event_t *event)
         return;
     }
 
-    if(lv_event_get_code(event) != LV_EVENT_GESTURE || keyboard_visible) return;
-
-    lv_indev_t *indev = lv_indev_get_act();
-    if(indev == NULL) return;
-
-    const lv_dir_t direction = lv_indev_get_gesture_dir(indev);
-    if(direction == LV_DIR_RIGHT) {
-        lv_indev_wait_release(indev);
-        _ui_screen_change(&ui_Screen3, LV_SCR_LOAD_ANIM_NONE, 0, 0,
-                          &ui_Screen3_screen_init);
-    } else if(direction == LV_DIR_LEFT) {
-        lv_indev_wait_release(indev);
-        _ui_screen_change(&ui_Screen5, LV_SCR_LOAD_ANIM_NONE, 0, 0,
-                          &ui_Screen5_screen_init);
-    }
 }
 
 void ui_Screen4_screen_init(void)
 {
     ui_Screen4 = lv_obj_create(NULL);
     lv_obj_clear_flag(ui_Screen4, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(ui_Screen4, lv_color_hex(0x070B10), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ui_Screen4, lv_color_hex(UI_BACKGROUND_COLOR), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(ui_Screen4, LV_OPA_COVER, LV_PART_MAIN);
 
     screen_title = lv_label_create(ui_Screen4);
@@ -492,7 +513,7 @@ void ui_Screen4_screen_init(void)
     wifi_list = lv_obj_create(ui_Screen4);
     lv_obj_set_size(wifi_list, 324, 206);
     lv_obj_align(wifi_list, LV_ALIGN_TOP_MID, 0, 113);
-    lv_obj_set_style_bg_color(wifi_list, lv_color_hex(0x0F171E), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(wifi_list, lv_color_hex(UI_BACKGROUND_COLOR), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(wifi_list, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(wifi_list, 1, LV_PART_MAIN);
     lv_obj_set_style_border_color(wifi_list, lv_color_hex(0x25343E), LV_PART_MAIN);
@@ -504,9 +525,20 @@ void ui_Screen4_screen_init(void)
     lv_obj_set_flex_align(wifi_list, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+    back_button = lv_btn_create(ui_Screen4);
+    lv_obj_set_size(back_button, 140, 52);
+    lv_obj_align(back_button, LV_ALIGN_TOP_MID, -76, 334);
+    lv_obj_set_ext_click_area(back_button, 4);
+    set_button_style(back_button, 0x26343D);
+    lv_obj_add_event_cb(back_button, back_button_event, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_label = lv_label_create(back_button);
+    lv_obj_set_style_text_font(back_label, ui_german_font_14(), LV_PART_MAIN);
+    lv_label_set_text(back_label, "Zurück");
+    lv_obj_center(back_label);
+
     connect_button = lv_btn_create(ui_Screen4);
-    lv_obj_set_size(connect_button, 160, 38);
-    lv_obj_align(connect_button, LV_ALIGN_TOP_MID, 0, 340);
+    lv_obj_set_size(connect_button, 140, 52);
+    lv_obj_align(connect_button, LV_ALIGN_TOP_MID, 76, 334);
     set_button_style(connect_button, 0x064A83);
     lv_obj_add_event_cb(connect_button, connect_button_event, LV_EVENT_CLICKED, NULL);
     connect_label = lv_label_create(connect_button);
@@ -603,7 +635,7 @@ void ui_Screen4_screen_init(void)
     connection_panel = lv_obj_create(connection_overlay);
     lv_obj_set_size(connection_panel, 320, 190);
     lv_obj_center(connection_panel);
-    lv_obj_set_style_bg_color(connection_panel, lv_color_hex(0x101A22), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(connection_panel, lv_color_hex(UI_BACKGROUND_COLOR), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(connection_panel, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_color(connection_panel, lv_color_hex(0x4FA8FF), LV_PART_MAIN);
     lv_obj_set_style_border_width(connection_panel, 1, LV_PART_MAIN);
@@ -611,6 +643,7 @@ void ui_Screen4_screen_init(void)
     lv_obj_clear_flag(connection_panel, LV_OBJ_FLAG_SCROLLABLE);
 
     connection_spinner = lv_spinner_create(connection_panel, 1000, 60);
+    ui_theme_style_spinner(connection_spinner);
     lv_obj_set_size(connection_spinner, 48, 48);
     lv_obj_align(connection_spinner, LV_ALIGN_TOP_MID, 0, 18);
     lv_obj_set_style_arc_color(connection_spinner, lv_color_hex(0x4FA8FF),
@@ -641,6 +674,7 @@ void ui_Screen4_screen_init(void)
     previous_wifi_connected = false;
     selected_network_secured = false;
     connection_dialog_active = false;
+    saved_network_attempt = false;
     connection_success_visible = false;
     selected_ssid[0] = '\0';
     last_scan_generation = UINT32_MAX;
@@ -669,6 +703,7 @@ void ui_Screen4_screen_destroy(void)
     password_ok_button = NULL;
     connect_button = NULL;
     connect_label = NULL;
+    back_button = NULL;
     list_heading = NULL;
     screen_title = NULL;
     for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
@@ -685,6 +720,11 @@ void ui_screen4_show(void)
 {
     _ui_screen_change(&ui_Screen4, LV_SCR_LOAD_ANIM_NONE, 0, 0,
                       &ui_Screen4_screen_init);
+}
+
+bool ui_screen4_can_open_quick_settings(void)
+{
+    return !keyboard_visible && lv_obj_has_flag(connection_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_screen4_update(void)
@@ -706,13 +746,16 @@ void ui_screen4_update(void)
         }
         if(lv_disp_get_draw_buf(display)->flushing) return;
         screen_start_pending = false;
-        if(!wifi_ota_initialized) {
-            wifi_ota_init();
-            wifi_ota_initialized = true;
-        }
         wifi_ota_screen_enter();
-        wifi_ota_start_scan();
-        refresh_network_list(true);
+        wifi_ota_snapshot_t snapshot = {0};
+        wifi_ota_get_snapshot(&snapshot);
+        scan_on_connect_finished = device_wifi_enabled() &&
+                                   !snapshot.scanning &&
+                                   (snapshot.connecting || snapshot.updating);
+        if(device_wifi_enabled() && !snapshot.scanning && !scan_on_connect_finished)
+            wifi_ota_start_scan();
+        wifi_ota_get_snapshot(&snapshot);
+        refresh_network_list(snapshot.scanning || scan_on_connect_finished);
         last_auto_scan_ms = lv_tick_get();
     }
 
@@ -722,18 +765,25 @@ void ui_screen4_update(void)
 
     wifi_ota_snapshot_t snapshot = {0};
     wifi_ota_get_snapshot(&snapshot);
+    if(scan_on_connect_finished && device_wifi_enabled() &&
+       !snapshot.connecting && !snapshot.updating && !snapshot.scanning) {
+        scan_on_connect_finished = false;
+        wifi_ota_start_scan();
+        wifi_ota_get_snapshot(&snapshot);
+        last_auto_scan_ms = now;
+        refresh_network_list(snapshot.scanning);
+    }
     for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
         const bool active = snapshot.connected &&
                             snapshot.signal_percent >= (int)((index + 1) * 25);
         lv_obj_set_style_arc_color(wifi_arcs[index],
-                                   lv_color_hex(active ? 0x4FA8FF : 0x394550),
+                                   lv_color_hex(active ? ui_theme_colors(device_theme())->accent : 0x394550),
                                    LV_PART_MAIN);
     }
     if(snapshot.scan_generation != last_scan_generation) {
         last_scan_generation = snapshot.scan_generation;
         last_auto_scan_ms = now;
         refresh_network_list(snapshot.scanning);
-        wifi_ota_networks_displayed();
     }
     if(snapshot.connected != previous_wifi_connected) {
         refresh_network_list(snapshot.scanning);
@@ -741,15 +791,30 @@ void ui_screen4_update(void)
     if(connection_dialog_active && !snapshot.connecting) {
         if(snapshot.connected) {
             char message[96];
-            snprintf(message, sizeof(message), "Verbunden mit %s\nIP: %s",
-                     snapshot.ssid, snapshot.ip);
+            const bool save_failed = snapshot.credential_save_failed;
+            if(save_failed)
+                snprintf(message, sizeof(message), "Verbunden, aber WLAN-Daten nicht gespeichert");
+            else
+                snprintf(message, sizeof(message), "Verbunden mit %s\nIP: %s",
+                         snapshot.ssid, snapshot.ip);
             show_connection_result(message);
-            lv_obj_add_flag(connection_done_button, LV_OBJ_FLAG_HIDDEN);
-            connection_success_ms = lv_tick_get();
-            connection_success_visible = true;
+            if(!save_failed) {
+                lv_obj_add_flag(connection_done_button, LV_OBJ_FLAG_HIDDEN);
+                connection_success_ms = lv_tick_get();
+                connection_success_visible = true;
+            }
         } else {
-            show_connection_result(snapshot.wifi_status);
+            if(saved_network_attempt) {
+                lv_obj_add_flag(connection_overlay, LV_OBJ_FLAG_HIDDEN);
+                lv_textarea_set_text(password_input, "");
+                lv_label_set_text(password_error_label, "Passwort prüfen und erneut eingeben");
+                lv_obj_clear_flag(password_error_label, LV_OBJ_FLAG_HIDDEN);
+                set_password_view(true);
+            } else {
+                show_connection_result(snapshot.wifi_status);
+            }
         }
+        saved_network_attempt = false;
         connection_dialog_active = false;
     }
     if(snapshot.connected && !previous_wifi_connected) {
@@ -757,7 +822,7 @@ void ui_screen4_update(void)
     }
     previous_wifi_connected = snapshot.connected;
 
-    if(!keyboard_visible && !snapshot.scanning && !snapshot.connecting &&
+    if(device_wifi_enabled() && !keyboard_visible && !snapshot.scanning && !snapshot.connecting &&
        !snapshot.updating &&
        now - last_auto_scan_ms >= WIFI_SCAN_INTERVAL_MS) {
         last_auto_scan_ms = now;

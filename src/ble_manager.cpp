@@ -1,6 +1,7 @@
 #include "ble_manager.h"
 #include <NimBLEDevice.h>
 #include <Arduino.h>
+#include "device_settings.h"
 
 #define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -28,7 +29,10 @@ class MyServerCallbacks: public NimBLEServerCallbacks {
 void ble_init(void) {
     if (ble_initialized) return;
 
-    NimBLEDevice::init("ESP32_Thermostat");
+    if(!NimBLEDevice::init("ESP32_Thermostat")) {
+        Serial.println("Bluetooth: initialization failed");
+        return;
+    }
     NimBLEDevice::setPower(ESP_PWR_LVL_P9);
 
     pServer = NimBLEDevice::createServer();
@@ -49,19 +53,42 @@ void ble_init(void) {
 }
 
 void ble_toggle(void) {
-    // Falls noch nicht initialisiert, jetzt sicher synchron laden
-    if (!ble_initialized) {
-        ble_init();
-    }
+    ble_set_enabled(!ble_active);
+}
 
-    ble_active = !ble_active;
-
-    if (ble_active) {
-        NimBLEDevice::startAdvertising();
+bool ble_set_enabled(bool enabled) {
+    if(enabled == ble_active) return true;
+    if(enabled) {
+        if(!ble_initialized) ble_init();
+        if(!ble_initialized) return false;
+        if(!NimBLEDevice::startAdvertising()) {
+            Serial.println("Bluetooth: advertising could not be started");
+            return false;
+        }
+        ble_active = true;
     } else {
-        NimBLEDevice::stopAdvertising();
+        ble_active = false;
+        if(!NimBLEDevice::stopAdvertising()) {
+            Serial.println("Bluetooth: advertising could not be stopped");
+            ble_active = true;
+            return false;
+        }
+        for(uint16_t peer : pServer->getPeerDevices()) {
+            if(!pServer->disconnect(peer)) {
+                Serial.println("Bluetooth: failed to disconnect peer");
+                ble_active = true;
+                NimBLEDevice::startAdvertising();
+                return false;
+            }
+        }
         deviceConnected = false;
     }
+    if(device_bluetooth_enabled() != enabled &&
+       !device_set_bluetooth_enabled(enabled)) {
+        Serial.println("Bluetooth: state was not saved");
+        return false;
+    }
+    return true;
 }
 
 bool ble_is_active(void) {

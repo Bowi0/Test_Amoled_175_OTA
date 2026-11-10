@@ -34,6 +34,10 @@ struct AviInfo {
   uint32_t movi_end = 0;
 };
 
+struct IntroFilesystem {
+  ~IntroFilesystem() { SPIFFS.end(); }
+};
+
 struct JpegInput {
   const uint8_t *data;
   uint32_t bytes_remaining;
@@ -397,6 +401,7 @@ void play_intro()
     return;
   }
 
+  IntroFilesystem filesystem;
   File file = SPIFFS.open(INTRO_FILE, FILE_READ);
   if (!file) {
     Serial.println("Intro skipped: /intro.avi is missing.");

@@ -5,11 +5,15 @@
 
 #include "ui.h"
 #include "ui_helpers.h"
+#include "ui_theme.h"
+#include "ui_german_font.h"
 
 ///////////////////// VARIABLES ////////////////////
 
 // EVENTS
 lv_obj_t * ui____initial_actions0;
+static lv_obj_t *loading_screen;
+static unsigned startup_step;
 
 // IMAGES AND IMAGE SETS
 
@@ -30,20 +34,61 @@ void ui_init(void)
     lv_theme_t * theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED),
                                                false, LV_FONT_DEFAULT);
     lv_disp_set_theme(dispp, theme);
-    ui_Screen1_screen_init();
-    ui_Screen2_screen_init();
-    ui_Screen3_screen_init();
-    ui_Screen4_screen_init();
-    ui_Screen5_screen_init();
-    ui____initial_actions0 = lv_obj_create(NULL);
-    lv_disp_load_scr(ui_Screen1);
+    loading_screen = lv_obj_create(NULL);
+    lv_obj_clear_flag(loading_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(loading_screen, lv_color_hex(UI_BACKGROUND_COLOR), LV_PART_MAIN);
+    lv_obj_t *spinner = lv_spinner_create(loading_screen, 1000, 60);
+    ui_theme_style_spinner(spinner);
+    lv_obj_set_size(spinner, 70, 70);
+    lv_obj_align(spinner, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_set_style_arc_color(spinner, lv_color_hex(ui_theme_colors(device_theme())->accent),
+                               LV_PART_INDICATOR);
+    lv_obj_t *label = lv_label_create(loading_screen);
+    lv_label_set_text(label, "Laden...");
+    lv_obj_set_style_text_font(label, ui_german_font_14(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 45);
+    lv_disp_load_scr(loading_screen);
+    lv_refr_now(dispp);
+    startup_step = 0;
+}
+
+void ui_init_step(void)
+{
+    switch(startup_step) {
+    case 0: ui_Screen1_screen_init(); break;
+    case 1: ui_Screen4_screen_init(); break;
+    case 2: ui_Screen5_screen_init(); break;
+    case 3: ui_Screen6_screen_init(); break;
+    case 4: ui_theme_screen_init(); break;
+    case 5: ui_clock_init(); break;
+    case 6: ui_switches_init(); break;
+    case 7:
+        lv_obj_add_event_cb(ui_Screen1, ui_quick_settings_gesture, LV_EVENT_GESTURE, NULL);
+        lv_obj_add_event_cb(ui_Clock, ui_quick_settings_gesture, LV_EVENT_GESTURE, NULL);
+        lv_obj_add_event_cb(ui_Switches, ui_quick_settings_gesture, LV_EVENT_GESTURE, NULL);
+        lv_obj_add_event_cb(ui_Screen5, ui_quick_settings_gesture, LV_EVENT_GESTURE, NULL);
+        ui____initial_actions0 = lv_obj_create(NULL);
+        lv_disp_load_scr(ui_Screen1);
+        lv_refr_now(lv_disp_get_default());
+        lv_obj_del(loading_screen);
+        loading_screen = NULL;
+        ui_settings_startup();
+        break;
+    default: return;
+    }
+    startup_step++;
 }
 
 void ui_destroy(void)
 {
     ui_Screen1_screen_destroy();
-    ui_Screen2_screen_destroy();
-    ui_Screen3_screen_destroy();
+    ui_clock_destroy();
+    ui_switches_destroy();
     ui_Screen4_screen_destroy();
     ui_Screen5_screen_destroy();
+    ui_Screen6_screen_destroy();
+    ui_theme_screen_destroy();
+    if(loading_screen) lv_obj_del(loading_screen);
+    loading_screen = NULL;
 }

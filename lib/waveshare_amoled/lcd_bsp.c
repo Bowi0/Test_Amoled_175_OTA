@@ -106,8 +106,8 @@ void lcd_lvgl_Init(void)
   // --- 2. LVGL & Speicher-Initialisierung ---
   lv_init();
 
-  // 20 Zeilen Pufferhöhe für optimale SRAM-Nutzung & schnelle Partial-Updates
-  #define MY_BUF_HEIGHT 40
+  // Smaller DMA buffers leave internal RAM available for Wi-Fi and HTTPS.
+  #define MY_BUF_HEIGHT 20
   const uint32_t buf_pixels = EXAMPLE_LCD_H_RES * MY_BUF_HEIGHT;
   const size_t buf_size = buf_pixels * sizeof(lv_color_t);
 
@@ -281,6 +281,13 @@ esp_err_t lcd_draw_intro_frame_2x(uint16_t *pixels, uint64_t *scale_time_us,
   }
 
   return ESP_OK;
+}
+
+void lcd_release_intro_buffer(void)
+{
+  heap_caps_free(lcd_intro_scaled_buffer);
+  lcd_intro_scaled_buffer = NULL;
+  lcd_intro_scaled_buffer_rows = 0;
 }
 
 esp_err_t lcd_prepare_for_sleep(void)
