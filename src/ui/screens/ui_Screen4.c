@@ -12,6 +12,8 @@
 lv_obj_t *ui_Screen4 = NULL;
 
 static lv_obj_t *wifi_list;
+static lv_obj_t *scan_spinner;
+static lv_obj_t *empty_status_label;
 static lv_obj_t *password_panel;
 static lv_obj_t *password_input;
 static lv_obj_t *password_error_label;
@@ -48,7 +50,54 @@ static bool selected_network_secured;
 static bool connection_dialog_active;
 static bool connection_success_visible;
 static bool saved_network_attempt;
+static int scan_spinner_layout = -1;
 static char selected_ssid[33];
+static char listed_connected_ssid[33];
+
+static void update_scan_status(const wifi_ota_snapshot_t *snapshot)
+{
+    const bool waiting = scan_on_connect_finished &&
+                         (snapshot->connecting || snapshot->updating);
+    const bool searching = device_wifi_enabled() &&
+                           (screen_start_pending || snapshot->scanning ||
+                            scan_on_connect_finished);
+    const bool empty = wifi_ota_network_count() == 0 &&
+                       !(snapshot->connected && snapshot->ssid[0]);
+    const bool visible = !keyboard_visible && searching;
+    const bool scan_failed =
+        strstr(snapshot->wifi_status, "fehlgeschlagen") != NULL ||
+        strstr(snapshot->wifi_status, "abgebrochen") != NULL ||
+        strstr(snapshot->wifi_status, "nicht gestartet") != NULL;
+    const char *heading = visible && !empty
+                              ? (waiting ? "WLAN-SUCHE WARTET" : "SUCHE NACH NETZWERKEN")
+                              : "VERFÜGBARE NETZWERKE";
+    const char *message = !device_wifi_enabled() ? "WLAN ist ausgeschaltet"
+                          : waiting && snapshot->updating ? "Warte auf das Update..."
+                          : waiting ? "Warte auf WLAN-Verbindung..."
+                          : searching ? "Suche nach verfügbaren Netzwerken..."
+                          : scan_failed ? "Suche fehlgeschlagen — erneut versuchen"
+                                        : "Keine Netzwerke gefunden";
+    if(strcmp(lv_label_get_text(list_heading), heading) != 0)
+        lv_label_set_text(list_heading, heading);
+    if(strcmp(lv_label_get_text(empty_status_label), message) != 0)
+        lv_label_set_text(empty_status_label, message);
+    if(!keyboard_visible && empty)
+        lv_obj_clear_flag(empty_status_label, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(empty_status_label, LV_OBJ_FLAG_HIDDEN);
+    if(visible) {
+        const int layout = empty ? 0 : 1;
+        if(scan_spinner_layout != layout) {
+            lv_obj_set_size(scan_spinner, empty ? 36 : 20, empty ? 36 : 20);
+            lv_obj_align(scan_spinner, LV_ALIGN_TOP_MID, empty ? 0 : 155,
+                         empty ? 169 : 88);
+            scan_spinner_layout = layout;
+        }
+        lv_obj_clear_flag(scan_spinner, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(scan_spinner, LV_OBJ_FLAG_HIDDEN);
+    }
+}
 
 static void set_button_style(lv_obj_t *button, uint32_t color)
 {
@@ -80,6 +129,8 @@ static void set_password_view(bool visible)
         lv_obj_add_flag(screen_title, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(list_heading, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(scan_spinner, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(empty_status_label, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(connect_button, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(back_button, LV_OBJ_FLAG_HIDDEN);
         for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
@@ -99,6 +150,9 @@ static void set_password_view(bool visible)
         }
         lv_obj_add_flag(password_panel, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+        wifi_ota_snapshot_t snapshot = {0};
+        wifi_ota_get_snapshot(&snapshot);
+        update_scan_status(&snapshot);
     }
 }
 
@@ -228,25 +282,24 @@ static void network_row_event(lv_event_t *event)
     char ssid[33] = {0};
     int signal_percent = 0;
     bool secured = false;
-    if(!wifi_ota_get_network(index, ssid, sizeof(ssid), &signal_percent, &secured)) {
-        return;
-    }
+    wifi_ota_snapshot_t snapshot = {0};
+    wifi_ota_get_snapshot(&snapshot);
+    if(index == -1) {
+        if(!snapshot.connected || !snapshot.ssid[0]) return;
+        strlcpy(ssid, snapshot.ssid, sizeof(ssid));
+        secured = true;
+    } else if(!wifi_ota_get_network(index, ssid, sizeof(ssid), &signal_percent, &secured)) return;
 
     strlcpy(selected_ssid, ssid, sizeof(selected_ssid));
     selected_network_secured = secured;
 
-    wifi_ota_snapshot_t snapshot = {0};
-    wifi_ota_get_snapshot(&snapshot);
-    int row_index = 0;
-    for(int network_index = 0; network_index < wifi_ota_network_count(); network_index++) {
+    for(uint32_t row_index = 0; row_index < lv_obj_get_child_cnt(wifi_list); row_index++) {
+        lv_obj_t *row = lv_obj_get_child(wifi_list, row_index);
+        const int network_index = (int)(intptr_t)lv_obj_get_event_user_data(row, network_row_event);
         char network_ssid[33] = {0};
-        if(!wifi_ota_get_network(network_index, network_ssid,
-                                 sizeof(network_ssid), NULL, NULL)) {
-            continue;
-        }
-
-        lv_obj_t *row = lv_obj_get_child(wifi_list, row_index++);
-        if(row == NULL) continue;
+        if(network_index == -1) strlcpy(network_ssid, snapshot.ssid, sizeof(network_ssid));
+        else if(!wifi_ota_get_network(network_index, network_ssid,
+                                      sizeof(network_ssid), NULL, NULL)) continue;
         const bool connected = snapshot.connected &&
                                strcmp(snapshot.ssid, network_ssid) == 0;
         const bool selected = strcmp(selected_ssid, network_ssid) == 0;
@@ -258,7 +311,33 @@ static void network_row_event(lv_event_t *event)
     update_connect_button(&snapshot);
 }
 
-static void refresh_network_list(bool scanning)
+static void add_network_row(int index, const char *ssid, int signal_percent, bool secured,
+                            bool connected, bool selected)
+{
+    lv_obj_t *row = lv_btn_create(wifi_list);
+    lv_obj_set_size(row, 302, 36);
+    set_network_row_style(row, selected);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 11, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(row, 12, LV_PART_MAIN);
+    lv_obj_add_event_cb(row, network_row_event, LV_EVENT_CLICKED, (void *)(intptr_t)index);
+
+    lv_obj_t *name_label = lv_label_create(row);
+    if(connected) lv_label_set_text_fmt(name_label, "Verbunden  %s", ssid);
+    else lv_label_set_text_fmt(name_label, "%s%s", secured ? "" : "OPEN  ", ssid);
+    lv_label_set_long_mode(name_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(name_label, 240);
+    lv_obj_align(name_label, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_text_font(name_label, ui_german_font_14(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(name_label,
+                                lv_color_hex(connected ? ui_theme_colors(device_theme())->light : 0xFFFFFF),
+                                LV_PART_MAIN);
+    lv_obj_clear_flag(name_label, LV_OBJ_FLAG_CLICKABLE);
+    draw_signal_bars(row, signal_percent);
+    if(connected) lv_obj_move_to_index(row, 0);
+}
+
+static void refresh_network_list(void)
 {
     char previous_selection[sizeof(selected_ssid)];
     strlcpy(previous_selection, selected_ssid, sizeof(previous_selection));
@@ -266,30 +345,13 @@ static void refresh_network_list(bool scanning)
     const int network_count = wifi_ota_network_count();
     wifi_ota_snapshot_t snapshot = {0};
     wifi_ota_get_snapshot(&snapshot);
-    if(network_count == 0) {
-        lv_obj_t *empty_label = lv_label_create(wifi_list);
-        const bool scan_failed =
-            strstr(snapshot.wifi_status, "fehlgeschlagen") != NULL ||
-            strstr(snapshot.wifi_status, "abgebrochen") != NULL ||
-            strstr(snapshot.wifi_status, "nicht gestartet") != NULL;
-        lv_label_set_text(empty_label,
-                          !device_wifi_enabled() ? "WLAN ist ausgeschaltet"
-                          : scanning ? "Suche nach Netzwerken..."
-                                   : scan_failed
-                                         ? "Suche fehlgeschlagen — erneut versuchen"
-                                         : "Keine Netzwerke gefunden");
-        lv_obj_set_style_text_font(empty_label, ui_german_font_14(), LV_PART_MAIN);
-        lv_obj_set_style_text_color(empty_label, lv_color_hex(0x9BAAB5), LV_PART_MAIN);
-        lv_obj_center(empty_label);
-        selected_ssid[0] = '\0';
-        selected_network_secured = false;
-        update_connect_button(&snapshot);
-        return;
-    }
+    strlcpy(listed_connected_ssid, snapshot.connected ? snapshot.ssid : "",
+            sizeof(listed_connected_ssid));
 
     selected_ssid[0] = '\0';
     selected_network_secured = false;
     bool selection_found = false;
+    bool connected_found = false;
 
     for(int index = 0; index < network_count; index++) {
         char ssid[33] = {0};
@@ -302,6 +364,7 @@ static void refresh_network_list(bool scanning)
 
         const bool connected = snapshot.connected &&
                                strcmp(snapshot.ssid, ssid) == 0;
+        connected_found |= connected;
         const bool selected = previous_selection[0] != '\0' &&
                               strcmp(previous_selection, ssid) == 0;
         if(selected) {
@@ -310,31 +373,17 @@ static void refresh_network_list(bool scanning)
             selection_found = true;
         }
 
-        lv_obj_t *row = lv_btn_create(wifi_list);
-        lv_obj_set_size(row, 302, 36);
-        set_network_row_style(row, selected);
-        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_radius(row, 11, LV_PART_MAIN);
-        lv_obj_set_style_pad_hor(row, 12, LV_PART_MAIN);
-        lv_obj_add_event_cb(row, network_row_event, LV_EVENT_CLICKED,
-                            (void *)(intptr_t)index);
+        add_network_row(index, ssid, signal_percent, secured, connected, selected);
+    }
 
-        lv_obj_t *name_label = lv_label_create(row);
-        if(connected) {
-            lv_label_set_text_fmt(name_label, "Verbunden  %s", ssid);
-        } else {
-            lv_label_set_text_fmt(name_label, "%s%s", secured ? "" : "OPEN  ", ssid);
+    if(snapshot.connected && snapshot.ssid[0] && !connected_found) {
+        const bool selected = strcmp(previous_selection, snapshot.ssid) == 0;
+        if(selected) {
+            strlcpy(selected_ssid, snapshot.ssid, sizeof(selected_ssid));
+            selected_network_secured = true;
+            selection_found = true;
         }
-        lv_label_set_long_mode(name_label, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(name_label, 240);
-        lv_obj_align(name_label, LV_ALIGN_LEFT_MID, 0, 0);
-        lv_obj_set_style_text_font(name_label, ui_german_font_14(), LV_PART_MAIN);
-        lv_obj_set_style_text_color(name_label,
-                                    lv_color_hex(connected ? ui_theme_colors(device_theme())->light : 0xFFFFFF),
-                                    LV_PART_MAIN);
-        lv_obj_clear_flag(name_label, LV_OBJ_FLAG_CLICKABLE);
-
-        draw_signal_bars(row, signal_percent);
+        add_network_row(-1, snapshot.ssid, snapshot.signal_percent, true, true, selected);
     }
 
     if(!selection_found) {
@@ -470,6 +519,7 @@ static void screen_event(lv_event_t *event)
         lv_obj_set_style_border_color(key_preview, lv_color_hex(colors->accent), LV_PART_MAIN);
         lv_obj_set_style_border_color(connection_panel, lv_color_hex(colors->accent), LV_PART_MAIN);
         lv_obj_set_style_arc_color(connection_spinner, lv_color_hex(colors->accent), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(scan_spinner, lv_color_hex(colors->accent), LV_PART_INDICATOR);
         lv_obj_set_style_bg_color(keyboard, lv_color_hex(colors->button), LV_PART_ITEMS);
         lv_obj_set_style_bg_color(keyboard, lv_color_darken(lv_color_hex(colors->button), LV_OPA_20),
                                   LV_PART_ITEMS | LV_STATE_PRESSED);
@@ -477,9 +527,13 @@ static void screen_event(lv_event_t *event)
         lv_obj_set_style_bg_color(wifi_list, lv_color_hex(colors->accent), LV_PART_SCROLLBAR);
         wifi_ota_snapshot_t snapshot = {0};
         wifi_ota_get_snapshot(&snapshot);
-        refresh_network_list(snapshot.scanning);
         screen_start_pending = true;
         screen_initial_refresh_started = false;
+        scan_on_connect_finished = device_wifi_enabled() &&
+                                   !snapshot.scanning &&
+                                   (snapshot.connecting || snapshot.updating);
+        refresh_network_list();
+        update_scan_status(&snapshot);
         return;
     }
 
@@ -524,6 +578,20 @@ void ui_Screen4_screen_init(void)
     lv_obj_set_flex_flow(wifi_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(wifi_list, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    scan_spinner = lv_spinner_create(ui_Screen4, 1000, 60);
+    ui_theme_style_spinner(scan_spinner);
+    lv_obj_clear_flag(scan_spinner, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(scan_spinner, LV_OBJ_FLAG_HIDDEN);
+
+    empty_status_label = lv_label_create(ui_Screen4);
+    lv_obj_set_width(empty_status_label, 290);
+    lv_label_set_long_mode(empty_status_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(empty_status_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_text_font(empty_status_label, ui_german_font_14(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(empty_status_label, lv_color_hex(0x9BAAB5), LV_PART_MAIN);
+    lv_obj_align(empty_status_label, LV_ALIGN_TOP_MID, 0, 216);
+    lv_obj_add_flag(empty_status_label, LV_OBJ_FLAG_HIDDEN);
 
     back_button = lv_btn_create(ui_Screen4);
     lv_obj_set_size(back_button, 140, 52);
@@ -680,6 +748,7 @@ void ui_Screen4_screen_init(void)
     last_scan_generation = UINT32_MAX;
     last_ui_update_ms = 0;
     last_auto_scan_ms = 0;
+    scan_spinner_layout = -1;
     lv_obj_add_event_cb(ui_Screen4, screen_event, LV_EVENT_ALL, NULL);
 }
 
@@ -688,6 +757,8 @@ void ui_Screen4_screen_destroy(void)
     if(ui_Screen4) lv_obj_del(ui_Screen4);
     ui_Screen4 = NULL;
     wifi_list = NULL;
+    scan_spinner = NULL;
+    empty_status_label = NULL;
     password_panel = NULL;
     password_input = NULL;
     password_error_label = NULL;
@@ -755,7 +826,8 @@ void ui_screen4_update(void)
         if(device_wifi_enabled() && !snapshot.scanning && !scan_on_connect_finished)
             wifi_ota_start_scan();
         wifi_ota_get_snapshot(&snapshot);
-        refresh_network_list(snapshot.scanning || scan_on_connect_finished);
+        refresh_network_list();
+        update_scan_status(&snapshot);
         last_auto_scan_ms = lv_tick_get();
     }
 
@@ -771,7 +843,7 @@ void ui_screen4_update(void)
         wifi_ota_start_scan();
         wifi_ota_get_snapshot(&snapshot);
         last_auto_scan_ms = now;
-        refresh_network_list(snapshot.scanning);
+        refresh_network_list();
     }
     for(size_t index = 0; index < sizeof(wifi_arcs) / sizeof(wifi_arcs[0]); index++) {
         const bool active = snapshot.connected &&
@@ -783,10 +855,11 @@ void ui_screen4_update(void)
     if(snapshot.scan_generation != last_scan_generation) {
         last_scan_generation = snapshot.scan_generation;
         last_auto_scan_ms = now;
-        refresh_network_list(snapshot.scanning);
+        refresh_network_list();
     }
-    if(snapshot.connected != previous_wifi_connected) {
-        refresh_network_list(snapshot.scanning);
+    if(snapshot.connected != previous_wifi_connected ||
+       strcmp(listed_connected_ssid, snapshot.connected ? snapshot.ssid : "") != 0) {
+        refresh_network_list();
     }
     if(connection_dialog_active && !snapshot.connecting) {
         if(snapshot.connected) {
@@ -827,7 +900,9 @@ void ui_screen4_update(void)
        now - last_auto_scan_ms >= WIFI_SCAN_INTERVAL_MS) {
         last_auto_scan_ms = now;
         wifi_ota_start_scan();
+        wifi_ota_get_snapshot(&snapshot);
     }
 
+    update_scan_status(&snapshot);
     update_connect_button(&snapshot);
 }

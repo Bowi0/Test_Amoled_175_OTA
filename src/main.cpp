@@ -87,6 +87,7 @@ void loop()
   uart_switch_loop();
   ui_init_step();
   wifi_ota_loop();
+  ui_screen1_update();
   ui_screen4_update();
   ui_screen5_update();
   ui_screen6_update();

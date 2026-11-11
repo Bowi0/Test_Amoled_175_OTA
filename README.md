@@ -61,9 +61,13 @@ interrupt on GPIO 11. The pin assignments and controller selection match
 
 Screen4 presents available Wi-Fi networks in a scrollable list with signal
 strength indicators. The list refreshes automatically while Screen4 is open,
-and previous results remain visible during a refresh. If a connection attempt
-is in progress when the page opens, the scan starts when that attempt ends.
-The connected network's name is displayed in the selected theme color.
+and previous results remain visible during a refresh. A spinner indicates a
+search; when no results are available, the page displays the search message
+instead of claiming that no networks were found. If a connection attempt or
+update is in progress when the page opens, the scan waits for it to finish and
+the page displays the reason for the wait.
+The connected network appears first, even before it is present in scan results;
+its name is displayed in the selected theme color.
 The selected network has a matching border, including when it is connected.
 Select a network and tap Connect; previously saved networks use their saved
 password, while new networks open the password entry view. If a saved
@@ -101,7 +105,7 @@ The Farbthema tile, marked with a color-drop symbol, opens square color tiles
 for blue, brown, silver, gold, or bronze. A check mark identifies the
 selected color.
 The selected theme is saved in NVS and changes controls and accent colors on
-the settings, Wi-Fi, and update pages; the Screen1 gauge is unchanged.
+the settings, Wi-Fi, and update pages; the brew-pressure gauge is unchanged.
 
 Swipe horizontally from Screen1 to open the four-output control page. Swipe
 left there for the analog clock and date, or right to return to Screen1.
@@ -125,10 +129,30 @@ For the current display test, the companion reads a potentiometer on GPIO5
 and streams an approximately scaled 0–10 bar value roughly every 16 ms over
 CRC-protected UART frames. The direct 0–3.3 V ADC reading is not accurate over
 the entire range, particularly at the upper end; see the companion README.
-The display renders the most recent value
-without waiting for a new frame; if the link is lost, the needle holds its
-last value. The stream is suspended during Mainboard OTA. An older companion
-firmware does not provide these values.
+The display uses this value for the brew-pressure needle and relays it over
+Bluetooth. On link loss, the needle holds the last received value. The stream
+is suspended during Mainboard OTA. An older companion firmware does not
+provide these values.
+
+The existing pressure frame is brew-pressure. Additional CRC-protected frame
+types 9, 10 and 11 are reserved for steam-pressure, brew-temperature and
+brewhead-temperature. The two payload bytes are big-endian: unsigned centibar
+for steam-pressure and signed two's-complement hundredths of a degree Celsius
+for temperatures. Values are invalid until received and cleared on link loss or
+Mainboard OTA; the Zero does not yet send these three values.
+
+Screen1 includes a temporary simulated silver steam-pressure needle. It starts
+108 pixels from the center, extends to 30 pixels before the edge and has a
+4-pixel width. It moves linearly from 219° (0 bar) to 141°
+(3 bar) in 5 seconds and back in 5 seconds, independently of incoming
+steam-pressure values. The separate 80-pixel, 3-pixel-wide temperature needle
+starts at the center and simulates 75 °C at 230° to 100 °C at 130°, moving
+clockwise through 360° in 5 seconds and returning in 5 seconds. The
+brew-pressure needle starts 108 pixels from the center and ends 60 pixels
+before the edge, with the same 4-pixel width. It uses the Zero's
+pressure value, mapping 0 bar to 254° and 15 bar to 106° clockwise through
+360°; values outside 0–15 bar are clamped for display. The Zero currently
+sends only 0–10 bar. Angles use 0° at 12 o'clock and increase clockwise.
 
 The update page provides separate Display and Mainboard buttons. Mainboard
 updates are downloaded over HTTPS from `Bowi0/ESP32-S3-Zero-KM` and checked

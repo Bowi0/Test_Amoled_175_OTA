@@ -4,11 +4,13 @@
 #include <cstdio>
 #include <vector>
 #include <cstring>
+#include <cmath>
 
 #include "Arduino.h"
 #include "firmware_version.h"
 #include "uart_switch_protocol.h"
 #include "uart_switch.h"
+#include "ui/screens/steam_needle_geometry.h"
 
 #define setup receiver_setup
 #define loop receiver_loop
@@ -152,6 +154,53 @@ static void advance(uint32_t duration)
 
 static void protocol_test()
 {
+    assert(steam_simulated_angle(0) == 219.0f);
+    assert(steam_simulated_angle(2500) == 180.0f);
+    assert(steam_simulated_angle(5000) == 141.0f);
+    assert(steam_simulated_angle(7500) == 180.0f);
+    assert(steam_simulated_angle(10000) == 219.0f);
+    assert(steam_simulated_angle(12500) == 180.0f);
+    assert(temperature_simulated_angle(0) == 230.0f);
+    assert(temperature_simulated_angle(2500) == 360.0f);
+    assert(temperature_simulated_angle(5000) == 490.0f);
+    assert(temperature_simulated_angle(7500) == 360.0f);
+    assert(temperature_simulated_angle(10000) == 230.0f);
+    assert(brew_pressure_angle(-1.0f) == 254.0f);
+    assert(brew_pressure_angle(0.0f) == 254.0f);
+    assert(brew_pressure_angle(7.5f) == 360.0f);
+    assert(brew_pressure_angle(15.0f) == 466.0f);
+    assert(brew_pressure_angle(20.0f) == 466.0f);
+    const auto brew_end = steam_needle_points(233, 233, PRESSURE_NEEDLE_INNER_RADIUS,
+                                              233 - BREW_NEEDLE_EDGE_GAP, brew_pressure_angle(15.0f));
+    const auto brew_106 = steam_needle_points(233, 233, PRESSURE_NEEDLE_INNER_RADIUS,
+                                              233 - BREW_NEEDLE_EDGE_GAP, 106);
+    assert(std::fabs(brew_end.outer_x - brew_106.outer_x) < 0.001f);
+    assert(std::fabs(brew_end.outer_y - brew_106.outer_y) < 0.001f);
+    assert(std::fabs(std::hypot(brew_end.inner_x - 233, brew_end.inner_y - 233) - 108) < 0.001f);
+    assert(std::fabs(std::hypot(brew_end.outer_x - 233, brew_end.outer_y - 233) - 173) < 0.001f);
+    const auto temperature_end = steam_needle_points(233, 233, 0, 80, temperature_simulated_angle(5000));
+    const auto temperature_130 = steam_needle_points(233, 233, 0, 80, 130);
+    assert(std::fabs(temperature_end.outer_x - temperature_130.outer_x) < 0.001f);
+    assert(std::fabs(temperature_end.outer_y - temperature_130.outer_y) < 0.001f);
+    for(float angle : {141.0f, 180.0f, 219.0f}) {
+        const auto points = steam_needle_points(233, 233, PRESSURE_NEEDLE_INNER_RADIUS,
+                                                233 - STEAM_NEEDLE_EDGE_GAP, angle);
+        assert(std::fabs(std::hypot(points.inner_x - 233, points.inner_y - 233) - 108) < 0.001f);
+        assert(std::fabs(std::hypot(points.outer_x - 233, points.outer_y - 233) - 203) < 0.001f);
+    }
+    const auto left = steam_needle_points(233, 233, 100, 223, 219);
+    const auto right = steam_needle_points(233, 233, 100, 223, 141);
+    assert(left.outer_x < 233 && right.outer_x > 233);
+    for(int angle : {0, 90, 180, 270, 360}) {
+        const auto points = steam_needle_points(233, 233, 0, 80, (float)angle);
+        assert(std::fabs(points.inner_x - 233) < 0.001f);
+        assert(std::fabs(points.inner_y - 233) < 0.001f);
+        assert(std::fabs(std::hypot(points.outer_x - 233, points.outer_y - 233) - 80) < 0.001f);
+        if(angle == 0 || angle == 360) assert(std::fabs(points.outer_y - 153) < 0.001f);
+        if(angle == 90) assert(std::fabs(points.outer_x - 313) < 0.001f);
+        if(angle == 180) assert(std::fabs(points.outer_y - 313) < 0.001f);
+        if(angle == 270) assert(std::fabs(points.outer_x - 153) < 0.001f);
+    }
     uint32_t current[3];
     uint32_t available[3];
     assert(parse_firmware_version("v0.2.14", current));
@@ -217,6 +266,37 @@ int main()
     assert(uart_switch_take_pressure(&pressure_bar));
     assert(pressure_bar >= 0.0f && pressure_bar <= 10.0f);
     assert(!uart_switch_take_pressure(&pressure_bar));
+    uart_measurements_t measurements = {};
+    assert(uart_switch_measurements(&measurements));
+    assert(!measurements.steam_pressure_valid && !measurements.brew_temperature_valid &&
+           !measurements.brewhead_temperature_valid);
+    uint8_t sensor_frame[SWITCH_FRAME_SIZE];
+    switch_encode(sensor_frame, SWITCH_STEAM_PRESSURE, 0, 150);
+    for(uint8_t value : sensor_frame) incoming[0].push_back(value);
+    switch_encode(sensor_frame, SWITCH_BREW_TEMPERATURE, 0x24, 0x2a);
+    for(uint8_t value : sensor_frame) incoming[0].push_back(value);
+    switch_encode(sensor_frame, SWITCH_BREWHEAD_TEMPERATURE, 0xff, 0x83);
+    for(uint8_t value : sensor_frame) incoming[0].push_back(value);
+    uart_switch_loop();
+    assert(uart_switch_take_steam_pressure(&pressure_bar) && pressure_bar == 1.5f);
+    assert(!uart_switch_take_steam_pressure(&pressure_bar));
+    assert(uart_switch_measurements(&measurements));
+    assert(measurements.steam_pressure_valid && measurements.brew_temperature_valid &&
+           measurements.brewhead_temperature_valid);
+    assert(std::fabs(measurements.brew_temperature_c - 92.58f) < 0.001f);
+    assert(std::fabs(measurements.brewhead_temperature_c - (-1.25f)) < 0.001f);
+    switch_encode(sensor_frame, SWITCH_STEAM_PRESSURE, 0, 200);
+    sensor_frame[6] ^= 1;
+    for(uint8_t value : sensor_frame) incoming[0].push_back(value);
+    uart_switch_loop();
+    assert(!uart_switch_take_steam_pressure(&pressure_bar));
+    assert(uart_switch_measurements(&measurements) && measurements.steam_pressure_bar == 1.5f);
+    switch_encode(sensor_frame, SWITCH_STEAM_PRESSURE, 0, 100);
+    for(uint8_t value : sensor_frame) incoming[0].push_back(value);
+    switch_encode(sensor_frame, SWITCH_STEAM_PRESSURE, 1, 44);
+    for(uint8_t value : sensor_frame) incoming[0].push_back(value);
+    uart_switch_loop();
+    assert(uart_switch_take_steam_pressure(&pressure_bar) && pressure_bar == 3.0f);
     advance(100);
     uart_switch_loop();
     assert(uart_switch_take_pressure(&pressure_bar));
@@ -308,6 +388,10 @@ int main()
     advance(2300);
     assert(!uart_switch_online() && uart_switch_state() == 0);
     assert(!uart_switch_take_pressure(&pressure_bar));
+    assert(!uart_switch_take_steam_pressure(&pressure_bar));
+    assert(uart_switch_measurements(&measurements));
+    assert(!measurements.steam_pressure_valid && !measurements.brew_temperature_valid &&
+           !measurements.brewhead_temperature_valid);
     assert(!pressure_streaming);
     assert(!uart_switch_version(version, sizeof(version)));
     assert_off();

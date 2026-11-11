@@ -16,11 +16,10 @@ extern void ui_Screen1_screen_destroy(void);
 extern void ui_event_Screen1(lv_event_t * e);
 extern lv_obj_t * ui_Screen1;
 extern lv_obj_t * ui_BackgroundScreen1;
-extern lv_obj_t * ui_Zeiger;
 void ui_set_pressure_bar(float pressure_bar);
+void ui_screen1_update(void);
 // CUSTOM VARIABLES
 extern lv_obj_t * uic_BackgroundScreen1;
-extern lv_obj_t * uic_Zeiger;
 
 #ifdef __cplusplus
 } /*extern "C"*/

@@ -26,6 +26,8 @@ static uint32_t version_last_request;
 static uint32_t version_last_received;
 static uint16_t pressure_centibar;
 static bool pressure_pending;
+static uart_measurements_t measurements;
+static bool steam_pressure_pending;
 
 extern "C" void uart_switch_init(void)
 {
@@ -48,6 +50,8 @@ extern "C" void uart_switch_loop(void)
         version_valid = false;
         version_waiting = false;
         pressure_pending = false;
+        measurements = {};
+        steam_pressure_pending = false;
         last_sent = now - 250;
     }
     while(uart_link.available()) {
@@ -63,6 +67,23 @@ extern "C" void uart_switch_loop(void)
             if(value <= SWITCH_PRESSURE_MAX_CENTIBAR) {
                 pressure_centibar = value;
                 pressure_pending = true;
+            }
+        } else if(online && parser.data[2] >= SWITCH_STEAM_PRESSURE &&
+                  parser.data[2] <= SWITCH_BREWHEAD_TEMPERATURE) {
+            const uint16_t raw = ((uint16_t)parser.data[3] << 8) | parser.data[4];
+            if(parser.data[2] == SWITCH_STEAM_PRESSURE) {
+                measurements.steam_pressure_bar = raw / 100.0f;
+                measurements.steam_pressure_valid = true;
+                steam_pressure_pending = true;
+            } else {
+                const int32_t signed_raw = raw < 0x8000 ? raw : (int32_t)raw - 0x10000;
+                if(parser.data[2] == SWITCH_BREW_TEMPERATURE) {
+                    measurements.brew_temperature_c = signed_raw / 100.0f;
+                    measurements.brew_temperature_valid = true;
+                } else {
+                    measurements.brewhead_temperature_c = signed_raw / 100.0f;
+                    measurements.brewhead_temperature_valid = true;
+                }
             }
         } else if(version_waiting && parser.data[3] == version_sequence &&
                   parser.data[2] >= SWITCH_VERSION_MAJOR &&
@@ -145,6 +166,26 @@ extern "C" bool uart_switch_take_pressure(float *pressure_bar)
     xSemaphoreGive(uart_mutex);
     return available;
 }
+extern "C" bool uart_switch_take_steam_pressure(float *pressure_bar)
+{
+    if(!pressure_bar || !uart_mutex || xSemaphoreTake(uart_mutex, 0) != pdTRUE)
+        return false;
+    const bool available = online && steam_pressure_pending;
+    if(available) {
+        *pressure_bar = measurements.steam_pressure_bar;
+        steam_pressure_pending = false;
+    }
+    xSemaphoreGive(uart_mutex);
+    return available;
+}
+extern "C" bool uart_switch_measurements(uart_measurements_t *result)
+{
+    if(!result || !uart_mutex || xSemaphoreTake(uart_mutex, 0) != pdTRUE)
+        return false;
+    *result = measurements;
+    xSemaphoreGive(uart_mutex);
+    return true;
+}
 extern "C" bool uart_switch_toggle(unsigned channel)
 {
     if(!uart_mutex || xSemaphoreTake(uart_mutex, 0) != pdTRUE) return false;
@@ -167,6 +208,8 @@ extern "C" bool uart_update_acquire(void)
     version_waiting = false;
     awaiting_ack = false;
     pressure_pending = false;
+    measurements = {};
+    steam_pressure_pending = false;
     parser = {};
     while(uart_link.available()) uart_link.read();
     uint8_t frame[SWITCH_FRAME_SIZE];

@@ -5,26 +5,84 @@
 
 #include "../ui.h"
 #include "ble_manager.h"
+#include "steam_needle_geometry.h"
 
-lv_obj_t * uic_Zeiger;
 lv_obj_t * uic_BackgroundScreen1;
 lv_obj_t * ui_Screen1 = NULL;
 lv_obj_t * ui_BackgroundScreen1 = NULL;
-lv_obj_t * ui_Zeiger = NULL;
 lv_obj_t * ui_LabelFPS = NULL;
+typedef struct {
+    lv_obj_t *lines[3];
+    lv_point_t points[2];
+    lv_point_t absolute_points[2];
+    unsigned line_count;
+    bool points_valid;
+} needle_t;
+
+static needle_t steam_needle;
+static needle_t temperature_needle;
+static needle_t brew_needle;
+static float latest_brew_pressure;
+static uint32_t steam_simulation_start;
+static uint32_t steam_last_update;
+
+static void update_needle(needle_t *needle, float inner_radius, float outer_radius, float angle)
+{
+    const lv_coord_t width = lv_disp_get_hor_res(lv_obj_get_disp(ui_Screen1));
+    const lv_coord_t height = lv_disp_get_ver_res(lv_obj_get_disp(ui_Screen1));
+    const steam_needle_points_t points = steam_needle_points(
+        width / 2.0f, height / 2.0f, inner_radius, outer_radius, angle);
+    const lv_point_t next[2] = {
+        {(lv_coord_t)lroundf(points.inner_x), (lv_coord_t)lroundf(points.inner_y)},
+        {(lv_coord_t)lroundf(points.outer_x), (lv_coord_t)lroundf(points.outer_y)}
+    };
+    if(needle->points_valid && needle->absolute_points[0].x == next[0].x &&
+       needle->absolute_points[0].y == next[0].y && needle->absolute_points[1].x == next[1].x &&
+       needle->absolute_points[1].y == next[1].y) return;
+    for(unsigned i = 0; i < needle->line_count; i++) lv_obj_invalidate(needle->lines[i]);
+    needle->absolute_points[0] = next[0];
+    needle->absolute_points[1] = next[1];
+    const lv_coord_t x = LV_MIN(next[0].x, next[1].x);
+    const lv_coord_t y = LV_MIN(next[0].y, next[1].y);
+    for(unsigned i = 0; i < 2; i++) {
+        needle->points[i].x = next[i].x - x;
+        needle->points[i].y = next[i].y - y;
+    }
+    for(unsigned i = 0; i < needle->line_count; i++) {
+        lv_obj_set_pos(needle->lines[i], x, y);
+        lv_line_set_points(needle->lines[i], needle->points, 2);
+    }
+    needle->points_valid = true;
+}
+
+void ui_screen1_update(void)
+{
+    if(!ui_Screen1 || lv_scr_act() != ui_Screen1 || lv_tick_elaps(steam_last_update) < 16) return;
+    steam_last_update = lv_tick_get();
+    const lv_coord_t width = lv_disp_get_hor_res(lv_obj_get_disp(ui_Screen1));
+    const lv_coord_t height = lv_disp_get_ver_res(lv_obj_get_disp(ui_Screen1));
+    update_needle(&steam_needle, PRESSURE_NEEDLE_INNER_RADIUS,
+                  LV_MIN(width, height) / 2.0f - STEAM_NEEDLE_EDGE_GAP,
+                  steam_simulated_angle(steam_last_update - steam_simulation_start));
+    update_needle(&temperature_needle, 0.0f, 80.0f,
+                  temperature_simulated_angle(steam_last_update - steam_simulation_start));
+}
 
 #include "esp_timer.h" // WICHTIG: Füge diesen Header ganz oben in ui_Screen1.c ein!
 
 void ui_set_pressure_bar(float pressure_bar)
 {
+    latest_brew_pressure = pressure_bar;
+    if(ui_Screen1 && brew_needle.lines[0]) {
+        const lv_coord_t width = lv_disp_get_hor_res(lv_obj_get_disp(ui_Screen1));
+        const lv_coord_t height = lv_disp_get_ver_res(lv_obj_get_disp(ui_Screen1));
+        update_needle(&brew_needle, PRESSURE_NEEDLE_INNER_RADIUS,
+                      LV_MIN(width, height) / 2.0f - BREW_NEEDLE_EDGE_GAP,
+                      brew_pressure_angle(pressure_bar));
+    }
+
     if(pressure_bar < 0.0f) pressure_bar = 0.0f;
     if(pressure_bar > 10.0f) pressure_bar = 10.0f;
-
-    // 1. Zeiger bei JEDEM Aufruf flüssig bewegen (60 FPS)
-    if(ui_Zeiger) {
-        int16_t angle = (int16_t)(-1328.0f + (pressure_bar * 265.6f) + 0.5f);
-        lv_img_set_angle(ui_Zeiger, angle);
-    }
 
     static uint32_t last_pressure_send = 0;
     
@@ -65,23 +123,40 @@ void ui_Screen1_screen_init(void)
     lv_obj_add_flag(ui_BackgroundScreen1, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_BackgroundScreen1, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
-    ui_Zeiger = lv_img_create(ui_Screen1);
-    lv_img_set_src(ui_Zeiger, &ui_img_1169991659);
-    lv_obj_set_width(ui_Zeiger, LV_SIZE_CONTENT);   /// 1
-    lv_obj_set_height(ui_Zeiger, LV_SIZE_CONTENT);    /// 1
-    lv_obj_set_x(ui_Zeiger, 2);
-    lv_obj_set_y(ui_Zeiger, -72);
-    lv_obj_set_align(ui_Zeiger, LV_ALIGN_CENTER);
-    lv_obj_add_flag(ui_Zeiger, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
-    lv_obj_clear_flag(ui_Zeiger, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
-    lv_img_set_pivot(ui_Zeiger, 19, 165);
-    lv_img_set_antialias(ui_Zeiger, true);
+    needle_t *pressure_needles[] = {&steam_needle, &brew_needle};
+    for(unsigned n = 0; n < 2; n++) {
+        needle_t *needle = pressure_needles[n];
+        needle->line_count = 1;
+        needle->points_valid = false;
+        needle->lines[0] = lv_line_create(ui_Screen1);
+        lv_obj_set_style_line_color(needle->lines[0], lv_color_hex(0xDDE3E8), LV_PART_MAIN);
+        lv_obj_set_style_line_width(needle->lines[0], 4, LV_PART_MAIN);
+        lv_obj_set_style_line_opa(needle->lines[0], LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_line_rounded(needle->lines[0], false, LV_PART_MAIN);
+        lv_obj_clear_flag(needle->lines[0], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
+    steam_simulation_start = lv_tick_get();
+    steam_last_update = steam_simulation_start;
+    const lv_coord_t width = lv_disp_get_hor_res(lv_obj_get_disp(ui_Screen1));
+    const lv_coord_t height = lv_disp_get_ver_res(lv_obj_get_disp(ui_Screen1));
+    update_needle(&steam_needle, PRESSURE_NEEDLE_INNER_RADIUS,
+                  LV_MIN(width, height) / 2.0f - STEAM_NEEDLE_EDGE_GAP, 219.0f);
 
-    ui_set_pressure_bar(0.0f);
+    temperature_needle.line_count = 1;
+    temperature_needle.points_valid = false;
+    temperature_needle.lines[0] = lv_line_create(ui_Screen1);
+    lv_obj_set_style_line_color(temperature_needle.lines[0], lv_color_hex(0xDDE3E8), LV_PART_MAIN);
+    lv_obj_set_style_line_width(temperature_needle.lines[0], 3, LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(temperature_needle.lines[0], false, LV_PART_MAIN);
+    lv_obj_clear_flag(temperature_needle.lines[0], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    update_needle(&temperature_needle, 0.0f, 80.0f, 230.0f);
+
+    update_needle(&brew_needle, PRESSURE_NEEDLE_INNER_RADIUS,
+                  LV_MIN(width, height) / 2.0f - BREW_NEEDLE_EDGE_GAP,
+                  brew_pressure_angle(latest_brew_pressure));
 
     lv_obj_add_event_cb(ui_Screen1, ui_event_Screen1, LV_EVENT_ALL, NULL);
     uic_BackgroundScreen1 = ui_BackgroundScreen1;
-    uic_Zeiger = ui_Zeiger;
 }
 
 void ui_Screen1_screen_destroy(void)
@@ -92,6 +167,10 @@ void ui_Screen1_screen_destroy(void)
     ui_Screen1 = NULL;
     uic_BackgroundScreen1 = NULL;
     ui_BackgroundScreen1 = NULL;
-    uic_Zeiger = NULL;
-    ui_Zeiger = NULL;
+    for(unsigned i = 0; i < 3; i++) steam_needle.lines[i] = NULL;
+    for(unsigned i = 0; i < 3; i++) brew_needle.lines[i] = NULL;
+    temperature_needle.lines[0] = NULL;
+    steam_needle.points_valid = false;
+    brew_needle.points_valid = false;
+    temperature_needle.points_valid = false;
 }

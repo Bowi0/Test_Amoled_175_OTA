@@ -13,6 +13,9 @@
 #define SWITCH_VERSION_PATCH 6
 #define SWITCH_PRESSURE 7
 #define SWITCH_PRESSURE_STREAM 8
+#define SWITCH_STEAM_PRESSURE 9
+#define SWITCH_BREW_TEMPERATURE 10
+#define SWITCH_BREWHEAD_TEMPERATURE 11
 #define SWITCH_PRESSURE_MAX_CENTIBAR 1000
 
 static inline uint16_t switch_crc16(const uint8_t *data, unsigned length)
